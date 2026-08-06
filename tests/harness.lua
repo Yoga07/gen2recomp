@@ -19,6 +19,7 @@ local gfx = require("src.rom.gfx")
 local pics = require("src.rom.pics")
 local palettes = require("src.rom.palettes")
 local tilesets = require("src.rom.tilesets")
+local maps = require("src.rom.maps")
 
 local harness = {}
 
@@ -492,6 +493,96 @@ local function test_tilesets(rom)
   return result
 end
 
+--- Maps are confirmed by cross-checking two independently located structures.
+-- Every block id in a map's data must be one the tileset its header names
+-- actually defines. Map headers and tileset headers are found by separate
+-- searches in different banks, so agreement between them is not something a
+-- wrong offset produces.
+local function test_maps(rom, tileset_result)
+  log("\n== maps ==")
+  if not tileset_result then
+    log("  SKIP  tilesets were not located")
+    return
+  end
+
+  local result, why = maps.locate(rom, tileset_result.count)
+  if not check("located map headers", result ~= nil, why) then
+    return
+  end
+
+  log("        %d headers across %d runs", #result.headers, #result.runs)
+  for _, run in ipairs(result.runs) do
+    log("        run at 0x%06X (bank $%02X): %d headers",
+      run.offset, math.floor(run.offset / 0x4000), run.count)
+  end
+
+  check("Crystal has at least 250 maps", #result.headers >= 250,
+    ("found %d"):format(#result.headers))
+
+  local bad_dimensions, bad_environment = 0, 0
+  local with_connections = 0
+  local block_id_violations = 0
+  local checked_against_tileset = 0
+  local total_blocks = 0
+
+  for _, header in ipairs(result.headers) do
+    local attributes = header.attributes
+
+    if attributes.width < 1 or attributes.width > maps.MAX_DIMENSION
+      or attributes.height < 1 or attributes.height > maps.MAX_DIMENSION then
+      bad_dimensions = bad_dimensions + 1
+    end
+
+    if not header.environment_name then
+      bad_environment = bad_environment + 1
+    end
+
+    if attributes.connections ~= 0 then
+      with_connections = with_connections + 1
+    end
+
+    total_blocks = total_blocks + attributes.width * attributes.height
+
+    local tileset = tileset_result.headers[header.tileset]
+    if tileset then
+      checked_against_tileset = checked_against_tileset + 1
+      local highest = -1
+      for i = 0, attributes.width * attributes.height - 1 do
+        local id = rom:u8(attributes.block_data + i)
+        if id > highest then
+          highest = id
+        end
+      end
+      if highest >= tileset.block_count then
+        block_id_violations = block_id_violations + 1
+      end
+    end
+  end
+
+  check_equal("every map has usable dimensions", bad_dimensions, 0)
+  check_equal("every environment id is known", bad_environment, 0)
+
+  -- The decisive one.
+  check_equal("every map's block ids fit its tileset", block_id_violations, 0)
+  log("        %d maps checked against their tileset, %d blocks total",
+    checked_against_tileset, total_blocks)
+
+  -- Routes and towns connect to their neighbours; interiors do not. Both must
+  -- be present or the connection byte is being misread.
+  check("some maps have edge connections, most do not",
+    with_connections > 20 and with_connections < #result.headers / 2,
+    ("%d of %d have connections"):format(with_connections, #result.headers))
+
+  -- Block data must be readable as a grid of the stated size.
+  local sample = result.headers[1]
+  local grid = maps.decode_block_data(rom, sample)
+  check_equal("block data has one row per map row", #grid, sample.attributes.height)
+  check_equal("block data has one column per map column", #grid[1],
+    sample.attributes.width)
+
+  return result
+end
+
 --------------------------------------------------------------------------------
 
 function harness.run(rom_path, report_path)
@@ -514,7 +605,8 @@ function harness.run(rom_path, report_path)
     local found = test_tables(rom)
     test_sprites(rom, found and found.base_stats)
     test_palettes(rom, found and found.species_names and found.species_names.records)
-    test_tilesets(rom)
+    local tileset_result = test_tilesets(rom)
+    test_maps(rom, tileset_result)
     rom:release()
   end
 

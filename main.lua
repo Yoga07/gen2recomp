@@ -71,6 +71,8 @@ function love.load(args)
     ["--probe-palettes"] = "tests.probe_palettes",
     ["--probe-tilesets"] = "tests.probe_tilesets",
     ["--dump-tilesets"] = "tests.dump_tilesets",
+    ["--probe-maps"] = "tests.probe_maps",
+    ["--dump-maps"] = "tests.dump_maps",
   }
   for i, value in ipairs(args or {}) do
     local module = headless[value]

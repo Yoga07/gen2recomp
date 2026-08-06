@@ -24,13 +24,14 @@ engine does not exist yet.
 | Pokémon front and back sprites | working, 250 of 251 species |
 | Sprite palettes, normal and shiny | working |
 | Tilesets: graphics, blocks, collision | working, 31 tilesets |
+| Maps: headers, dimensions, block data, connections | working, 384 maps |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
-| Maps, map headers, connections | not started |
+| Map scripts and events | pointers extracted, not decoded |
 | Text banks | not started |
 | Audio | not started |
 | Engine (overworld, battle, menus) | not started |
 
-80 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+88 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
@@ -47,6 +48,7 @@ itself and does not depend on them:
 | Trainer pic pointers | `0x128000` | `$4A` |
 | Sprite palettes | `0x00A8D6` | `$02` |
 | Tileset headers | `0x04D596` | `$13` |
+| Map headers | `0x094034` | `$25` |
 
 ## Requirements
 

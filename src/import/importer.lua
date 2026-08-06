@@ -12,6 +12,7 @@ local locate = require("src.rom.locate")
 local pics = require("src.rom.pics")
 local palettes = require("src.rom.palettes")
 local tilesets = require("src.rom.tilesets")
+local maps = require("src.rom.maps")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -187,6 +188,53 @@ function importer.run(path, progress)
     cache.write(descriptor.game, "tilesets", records)
   end
 
+  -- Maps. Block data is cached rather than rendered: the engine draws from the
+  -- grid at runtime, and rendering 384 maps up front would cost minutes and
+  -- produce images nothing reads. `--dump-maps` renders them when a human needs
+  -- to look.
+  local map_summary = { count = 0, blocks = 0 }
+  if tileset_result then
+    step("locating maps")
+    local map_result, map_err = maps.locate(rom, tileset_result.count)
+
+    if not map_result then
+      failed.maps = map_err
+    else
+      map_summary.count = #map_result.headers
+      step(("extracting %d maps"):format(map_summary.count))
+
+      local records = {}
+      for index, header in ipairs(map_result.headers) do
+        local attributes = header.attributes
+        map_summary.blocks = map_summary.blocks + attributes.width * attributes.height
+
+        -- Block data is stored flat; the engine indexes it as
+        -- row * width + column rather than paying for a table per row.
+        local flat = {}
+        for i = 0, attributes.width * attributes.height - 1 do
+          flat[i + 1] = rom:u8(attributes.block_data + i)
+        end
+
+        records[index] = {
+          header_offset = header.offset,
+          tileset = header.tileset,
+          environment = header.environment_name,
+          width = attributes.width,
+          height = attributes.height,
+          border_block = attributes.border_block,
+          connections = maps.connection_list(attributes),
+          -- Kept so the script and event decoders have somewhere to start.
+          script_offset = attributes.scripts,
+          event_offset = attributes.events,
+          blocks = flat,
+        }
+      end
+
+      cache.write(descriptor.game, "maps", records)
+      offsets.map_headers = map_result.runs[1] and map_result.runs[1].offset
+    end
+  end
+
   cache.write(descriptor.game, "manifest", {
     format_version = cache.FORMAT_VERSION,
     game = descriptor.game,
@@ -218,6 +266,7 @@ function importer.run(path, progress)
     failed = failed,
     sprites = sprites,
     tilesets = tileset_summary,
+    maps = map_summary,
     sha1 = sha1,
   }
 end
@@ -252,6 +301,11 @@ function importer.format_report(report)
   if report.tilesets then
     lines[#lines + 1] = ("  %-16s %4d tilesets, %d blockset images")
       :format("tilesets", report.tilesets.count, report.tilesets.images)
+  end
+
+  if report.maps then
+    lines[#lines + 1] = ("  %-16s %4d maps, %d blocks total")
+      :format("maps", report.maps.count, report.maps.blocks)
   end
 
   if next(report.failed) then

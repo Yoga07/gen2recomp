@@ -118,6 +118,34 @@ tiles are loaded separately by the game — roofs vary by region, and some tiles
 are shared across tilesets — so this is a known gap rather than a decoding
 error. Blockset renders show it as blank 8x8 holes.
 
+## Maps, and two records that validate each other
+
+A map is described by two records in different places. A nine-byte header names
+the tileset, environment and music and points at a twelve-byte attributes
+record, which carries the border block, the dimensions in blocks, far pointers
+to the block data and the script header, the event pointer, and a four-bit mask
+saying which edges connect to neighbouring maps.
+
+Block data is `width * height` bytes, one block id per cell, row-major. Each
+block expands through the tileset into 4x4 tiles, so one map cell is 32x32
+pixels.
+
+The mutual dependency is what makes this findable without offsets. A header is
+only credible if the attributes record it points at has sane dimensions and a
+block pointer that resolves; the attributes record is only credible if its block
+data fits in the ROM. Requiring a run of headers that all satisfy both is
+already strong, and the confirmation is that **every block id in every map falls
+inside the block count of the tileset its header names** — 384 maps, 36,535
+blocks, no violations. Map headers and tileset headers are found by separate
+searches in different banks, so that agreement is not something a wrong offset
+produces.
+
+Two caveats worth keeping visible. The headers come back as two runs with a
+36-byte gap, which is four records the validator rejects — real maps whose
+fields fall outside the accepted ranges, not absent ones. And 384 has not been
+checked against an authoritative map count for Crystal, so treat it as "the maps
+that decode" rather than "all the maps".
+
 ## What is not decided yet
 
 - **Map representation.** Gen 2 maps are block-based: a tileset defines 4x4-tile
