@@ -1,0 +1,17 @@
+# Never let a cartridge image into the repository.
+*.gb
+*.gbc
+*.sav
+*.rtc
+
+# Import output and build artefacts.
+cache/
+build/
+*.love
+
+# Editor noise.
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
