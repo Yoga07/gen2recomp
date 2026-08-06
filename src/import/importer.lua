@@ -11,6 +11,7 @@ local versions = require("src.rom.versions")
 local locate = require("src.rom.locate")
 local pics = require("src.rom.pics")
 local palettes = require("src.rom.palettes")
+local tilesets = require("src.rom.tilesets")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -147,6 +148,45 @@ function importer.run(path, progress)
     end
   end
 
+  -- Tilesets. Block and collision tables go into the cache as data; the tile
+  -- graphics are written as one blockset image per tileset, which is both what
+  -- the renderer will want and what makes a decoding error obvious on sight.
+  step("locating tilesets")
+  local tileset_summary = { count = 0, images = 0 }
+  local tileset_result, tileset_err = tilesets.locate(rom)
+
+  if not tileset_result then
+    failed.tilesets = tileset_err
+  else
+    offsets.tileset_headers = tileset_result.offset
+    tileset_summary.count = tileset_result.count
+    cache.ensure(descriptor.game .. "/tilesets")
+    step(("extracting %d tilesets"):format(tileset_result.count))
+
+    local records = {}
+    for index, header in ipairs(tileset_result.headers) do
+      local tiles = tilesets.decode_graphics(rom, header)
+      if tiles then
+        local blocks = tilesets.decode_blocks(rom, header)
+        records[index] = {
+          graphics = header.graphics,
+          blocks_offset = header.blocks,
+          collision_offset = header.collision,
+          block_count = header.block_count,
+          tile_count = #tiles,
+          blocks = blocks,
+          collision = tilesets.decode_collision(rom, header),
+        }
+        local image = tilesets.blockset_image(tiles, blocks, 8)
+        if cache.write_image(descriptor.game,
+          ("tilesets/%02d_blocks"):format(index), image) then
+          tileset_summary.images = tileset_summary.images + 1
+        end
+      end
+    end
+    cache.write(descriptor.game, "tilesets", records)
+  end
+
   cache.write(descriptor.game, "manifest", {
     format_version = cache.FORMAT_VERSION,
     game = descriptor.game,
@@ -177,6 +217,7 @@ function importer.run(path, progress)
     offsets = offsets,
     failed = failed,
     sprites = sprites,
+    tilesets = tileset_summary,
     sha1 = sha1,
   }
 end
@@ -206,6 +247,11 @@ function importer.format_report(report)
   if report.sprites then
     lines[#lines + 1] = ("  %-16s %4d sprites written, %d failed")
       :format("sprites", report.sprites.written, report.sprites.failed)
+  end
+
+  if report.tilesets then
+    lines[#lines + 1] = ("  %-16s %4d tilesets, %d blockset images")
+      :format("tilesets", report.tilesets.count, report.tilesets.images)
   end
 
   if next(report.failed) then

@@ -18,6 +18,7 @@ local lz = require("src.rom.lz")
 local gfx = require("src.rom.gfx")
 local pics = require("src.rom.pics")
 local palettes = require("src.rom.palettes")
+local tilesets = require("src.rom.tilesets")
 
 local harness = {}
 
@@ -405,6 +406,92 @@ local function test_palettes(rom, species_names)
   return result
 end
 
+--- Tilesets are checked structurally and then by whether their block
+-- definitions actually reference the graphics they ship with. Block data that
+-- decoded at the wrong offset still yields tile indices, but they scatter
+-- across the whole 0-255 range instead of landing inside the tile sheet.
+local function test_tilesets(rom)
+  log("\n== tilesets ==")
+
+  local result, why = tilesets.locate(rom)
+  if not check("located the tileset header table", result ~= nil, why) then
+    return
+  end
+
+  log("        table at 0x%06X (bank $%02X), %d headers, %d bytes each",
+    result.offset, math.floor(result.offset / 0x4000), result.count,
+    tilesets.HEADER_SIZE)
+
+  check("Crystal ships at least 25 tilesets", result.count >= 25,
+    ("found %d"):format(result.count))
+
+  local bad_reserved, bad_graphics, bad_counts = 0, 0, 0
+  local clean_blocks = 0
+  local block_sizes = {}
+
+  for _, header in ipairs(result.headers) do
+    if header.reserved ~= 0 then
+      bad_reserved = bad_reserved + 1
+    end
+
+    block_sizes[header.block_count] = (block_sizes[header.block_count] or 0) + 1
+
+    -- Block counts are derived from the gap between the block and collision
+    -- pointers, so an implausible one means the header decoded wrong.
+    if header.block_count < tilesets.MIN_BLOCKS
+      or header.block_count > tilesets.MAX_BLOCKS then
+      bad_counts = bad_counts + 1
+    end
+
+    local tiles = tilesets.decode_graphics(rom, header)
+    if not tiles then
+      bad_graphics = bad_graphics + 1
+    else
+      local blocks = tilesets.decode_blocks(rom, header)
+      local out_of_range = 0
+      for _, block in ipairs(blocks) do
+        for _, tile_index in ipairs(block) do
+          if tile_index >= #tiles then
+            out_of_range = out_of_range + 1
+          end
+        end
+      end
+      if out_of_range == 0 then
+        clean_blocks = clean_blocks + 1
+      end
+    end
+  end
+
+  check_equal("every header's reserved word is zero", bad_reserved, 0)
+  check_equal("every tileset's graphics decompress", bad_graphics, 0)
+  check_equal("every block count is plausible", bad_counts, 0)
+
+  local sizes = {}
+  for count, n in pairs(block_sizes) do
+    sizes[#sizes + 1] = ("%d blocks x%d"):format(count, n)
+  end
+  table.sort(sizes)
+  log("        block counts: %s", table.concat(sizes, ", "))
+
+  -- Most tilesets are self-contained. A minority index past their own sheet
+  -- into tiles the game loads separately, which is a known gap rather than a
+  -- decoding error.
+  check(("most tilesets reference only their own tiles"),
+    clean_blocks >= result.count / 2,
+    ("%d of %d are self-contained"):format(clean_blocks, result.count))
+  log("        %d of %d tilesets reference tiles outside their own sheet",
+    result.count - clean_blocks, result.count)
+
+  -- Collision must decode to one value per quadrant for every block.
+  local header = result.headers[1]
+  local collision = tilesets.decode_collision(rom, header)
+  check_equal("collision has one entry per block", #collision, header.block_count)
+  check_equal("each collision entry has four quadrants", #collision[1],
+    tilesets.COLLISION_PER_BLOCK)
+
+  return result
+end
+
 --------------------------------------------------------------------------------
 
 function harness.run(rom_path, report_path)
@@ -427,6 +514,7 @@ function harness.run(rom_path, report_path)
     local found = test_tables(rom)
     test_sprites(rom, found and found.base_stats)
     test_palettes(rom, found and found.species_names and found.species_names.records)
+    test_tilesets(rom)
     rom:release()
   end
 

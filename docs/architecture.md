@@ -94,6 +94,30 @@ Note that with only two colours stored, the light slot holds whatever dominates
 the lit areas rather than the creature's "main" colour. Oddish's light colour is
 the green of its leaves, not the blue of its body.
 
+## Tilesets, and why block count is derived
+
+A Gen 2 map is a grid of *blocks*, not tiles. A tileset supplies both halves of
+the indirection: 8x8 tile graphics, and a block table where each block is a 4x4
+arrangement of those tiles. Drawing a map is therefore map cell to block, block
+to sixteen tiles.
+
+The header is fifteen bytes — three far pointers (graphics, blocks, collision)
+then three words (tile animation, an unused zero, palette map). The unused word
+and the relationship between the block and collision pointers are what identify
+the table: collision begins exactly where the block table ends.
+
+That relationship is also how block count is obtained, because **it is not
+stored anywhere**. Crystal's tilesets run to 64 or 128 blocks — 26 of the 31 use
+64 — so assuming a constant finds almost nothing. Dividing the pointer gap by
+the 16 bytes a block occupies gives the count directly, and the fact that the
+gap is always a whole number of blocks is itself strong evidence the header was
+read correctly.
+
+Thirteen of the 31 tilesets index past the end of their own tile sheet. Those
+tiles are loaded separately by the game — roofs vary by region, and some tiles
+are shared across tilesets — so this is a known gap rather than a decoding
+error. Blockset renders show it as blank 8x8 holes.
+
 ## What is not decided yet
 
 - **Map representation.** Gen 2 maps are block-based: a tileset defines 4x4-tile
