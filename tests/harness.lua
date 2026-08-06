@@ -17,6 +17,7 @@ local locate = require("src.rom.locate")
 local lz = require("src.rom.lz")
 local gfx = require("src.rom.gfx")
 local pics = require("src.rom.pics")
+local palettes = require("src.rom.palettes")
 
 local harness = {}
 
@@ -337,6 +338,73 @@ local function test_sprites(rom, base_stats)
   return table_info
 end
 
+--- Palettes are checked by hue rather than by exact colour values, which we do
+-- not know independently. A table decoded at the wrong offset would not produce
+-- a green Bulbasaur and a yellow Pikachu.
+local function test_palettes(rom, species_names)
+  log("\n== sprite palettes ==")
+
+  local result, why = palettes.locate(rom)
+  if not check("located the palette table", result ~= nil, why) then
+    return
+  end
+
+  log("        table at 0x%06X (bank $%02X), %d records, %d bytes each",
+    result.offset, math.floor(result.offset / 0x4000), #result.records,
+    palettes.RECORD_SIZE)
+
+  check_equal("one record per species", #result.records, 251)
+
+  -- Every stored colour must be a real 15-bit value.
+  local out_of_range = 0
+  for _, record in ipairs(result.records) do
+    for _, pair in ipairs { record.normal, record.shiny } do
+      for _, word in ipairs(pair) do
+        if word > 0x7FFF then
+          out_of_range = out_of_range + 1
+        end
+      end
+    end
+  end
+  check_equal("no colour has bit 15 set", out_of_range, 0)
+
+  -- Hue spot checks against species whose colour is not in dispute.
+  local expected = {
+    [1] = { "g", "BULBASAUR" },
+    [4] = { "r", "CHARMANDER" },
+    [25] = { "yellow", "PIKACHU" },
+    -- Jigglypuff is pink: red leads, but blue outranks green. A classifier
+    -- that compares the trailing channels to each other calls this blue.
+    [39] = { "r", "JIGGLYPUFF" },
+    -- Only two colours are stored per sprite, so the light slot is whatever
+    -- dominates the lit areas — Oddish's leaves, not its blue body.
+    [43] = { "g", "ODDISH" },
+  }
+
+  for species, want in pairs(expected) do
+    local record = result.records[species]
+    local light = record.normal[1]
+    local r, g, b = palettes.channels(light)
+    local dominant = palettes.dominant(light)
+    local name = species_names and species_names[species] or ("#" .. species)
+    check(("%s's light colour reads as %s"):format(name, want[1]),
+      dominant == want[1],
+      ("rgb %d,%d,%d reads as %s"):format(r, g, b, dominant))
+  end
+
+  -- Shiny palettes exist and mostly differ from the normal ones.
+  local differing = 0
+  for _, record in ipairs(result.records) do
+    if record.normal[1] ~= record.shiny[1] or record.normal[2] ~= record.shiny[2] then
+      differing = differing + 1
+    end
+  end
+  check("shiny palettes differ from normal ones", differing > 200,
+    ("%d of 251 differ"):format(differing))
+
+  return result
+end
+
 --------------------------------------------------------------------------------
 
 function harness.run(rom_path, report_path)
@@ -358,6 +426,7 @@ function harness.run(rom_path, report_path)
     test_lz_commands()
     local found = test_tables(rom)
     test_sprites(rom, found and found.base_stats)
+    test_palettes(rom, found and found.species_names and found.species_names.records)
     rom:release()
   end
 

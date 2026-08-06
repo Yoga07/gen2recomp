@@ -75,6 +75,25 @@ A third trap is subtler: pic tiles are stored **column-major**. Laying them out
 row-major yields a sprite that is recognisably the right creature and entirely
 scrambled, which is easy to mistake for a palette problem.
 
+## Palettes store two colours, not four
+
+A sprite palette is white, two stored colours, then black. Only the middle pair
+is in the ROM, so a record is four BGR555 words — a light/dark pair for the
+normal palette and another for shiny — and the table is 8 bytes per species
+rather than the 32 a four-colour palette would need.
+
+Locating it needed the same structure-plus-known-content approach as the data
+tables. Structure alone is too weak: "four 15-bit words" matches every
+zero-filled region in the cartridge. The tempting extra constraint — that the
+first colour of each pair is the brighter one — sounds like it must hold of a
+light/dark pair and does not; enforcing it caps the longest run in the ROM at
+98 records against the 251 needed. What settles it is hue: Bulbasaur is green,
+Charmander red, Pikachu yellow.
+
+Note that with only two colours stored, the light slot holds whatever dominates
+the lit areas rather than the creature's "main" colour. Oddish's light colour is
+the green of its leaves, not the blue of its body.
+
 ## What is not decided yet
 
 - **Map representation.** Gen 2 maps are block-based: a tileset defines 4x4-tile

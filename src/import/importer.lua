@@ -10,6 +10,7 @@ local header = require("src.rom.header")
 local versions = require("src.rom.versions")
 local locate = require("src.rom.locate")
 local pics = require("src.rom.pics")
+local palettes = require("src.rom.palettes")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -104,6 +105,18 @@ function importer.run(path, progress)
       failed.sprites = pic_err
     else
       offsets.pic_table = table_info.offset
+
+      -- Palettes are optional: without them sprites still export, in the
+      -- monochrome shades the original DMG hardware produced.
+      step("locating palettes")
+      local palette_result, palette_err = palettes.locate(rom)
+      if palette_result then
+        offsets.palettes = palette_result.offset
+        cache.write(descriptor.game, "palettes", palette_result.records)
+      else
+        failed.palettes = palette_err
+      end
+
       cache.ensure(descriptor.game .. "/sprites")
       step("extracting sprites")
 
@@ -114,8 +127,12 @@ function importer.run(path, progress)
           local tiles = pics.decode_front(rom, table_info, species, stats)
           if tiles then
             local record = stats[species]
+            local palette
+            if palette_result then
+              palette = palettes.to_rgb(palette_result.records[species].normal)
+            end
             local image = pics.to_image_data(tiles, record.sprite_width,
-              record.sprite_height, nil, true)
+              record.sprite_height, palette, true)
             local path = cache.write_image(descriptor.game,
               ("sprites/%03d_front"):format(species), image)
             sprites.written = sprites.written + (path and 1 or 0)
@@ -124,7 +141,9 @@ function importer.run(path, progress)
           end
         end
       end
-      step(("wrote %d sprites"):format(sprites.written))
+      sprites.colored = palette_result ~= nil
+      step(("wrote %d sprites (%s)"):format(sprites.written,
+        palette_result and "colour" or "monochrome"))
     end
   end
 

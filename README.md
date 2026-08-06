@@ -22,13 +22,13 @@ engine does not exist yet.
 | 2bpp tile and BGR555 palette decoding | working |
 | Species names, move names, base stats, move data | working |
 | Pokémon front and back sprites | working, 250 of 251 species |
+| Sprite palettes, normal and shiny | working |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
-| Sprite palettes | not started |
 | Tilesets, maps, text banks | not started |
 | Audio | not started |
 | Engine (overworld, battle, menus) | not started |
 
-66 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+72 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
@@ -43,6 +43,7 @@ itself and does not depend on them:
 | Move names | `0x1C9F29` | `$72` |
 | Pokémon pic pointers | `0x120000` | `$48` |
 | Trainer pic pointers | `0x128000` | `$4A` |
+| Sprite palettes | `0x00A8D6` | `$02` |
 
 ## Requirements
 
