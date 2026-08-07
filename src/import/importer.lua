@@ -15,6 +15,7 @@ local tilesets = require("src.rom.tilesets")
 local maps = require("src.rom.maps")
 local events = require("src.rom.events")
 local ow_sprites = require("src.rom.ow_sprites")
+local scripts = require("src.rom.scripts")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -232,7 +233,7 @@ function importer.run(path, progress)
   -- produce images nothing reads. `--dump-maps` renders them when a human needs
   -- to look.
   local map_summary = { count = 0, blocks = 0, warps = 0, objects = 0,
-                        event_failures = 0 }
+                        event_failures = 0, scripts = 0, scripts_read = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -284,6 +285,20 @@ function importer.run(path, progress)
           record.objects = decoded.objects
           map_summary.warps = map_summary.warps + #decoded.warps
           map_summary.objects = map_summary.objects + #decoded.objects
+
+          -- Attach whatever text each script displays. Scripts doing anything
+          -- more than showing a message are left without text rather than
+          -- guessed at.
+          local said = scripts.read_map_text(rom, header, decoded)
+          map_summary.scripts = map_summary.scripts + said.total
+          map_summary.scripts_read = map_summary.scripts_read + said.understood
+
+          for index, found in pairs(said.bg) do
+            record.bg_events[index].text = found.block.pages
+          end
+          for index, found in pairs(said.objects) do
+            record.objects[index].text = found.block.pages
+          end
         else
           map_summary.event_failures = map_summary.event_failures + 1
         end
@@ -389,6 +404,8 @@ function importer.format_report(report)
     lines[#lines + 1] = ("  %-16s %4d warps, %d objects, %d maps whose events failed")
       :format("events", report.maps.warps, report.maps.objects,
         report.maps.event_failures)
+    lines[#lines + 1] = ("  %-16s %4d of %d scripts read as text")
+      :format("scripts", report.maps.scripts_read, report.maps.scripts)
   end
 
   if next(report.failed) then

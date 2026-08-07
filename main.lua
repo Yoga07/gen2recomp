@@ -19,6 +19,7 @@ local HEADLESS = {
   ["--probe-events"] = "tests.probe_events",
   ["--probe-collision"] = "tests.probe_collision",
   ["--probe-ow-sprites"] = "tests.probe_ow_sprites",
+  ["--probe-text"] = "tests.probe_text",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }
@@ -124,6 +125,7 @@ function love.load(args)
       state.shot = {
         path = args[i + 1],
         map_index = tonumber(args[i + 2]),
+        sign = args[i + 2] == "sign",
         frames = 2,
       }
     end
@@ -139,6 +141,9 @@ function love.load(args)
   if game_id then
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
+    end
+    if state.shot and state.shot.sign then
+      state.game:show_first_sign()
     end
   else
     show_idle()
@@ -190,7 +195,9 @@ end
 
 function love.keypressed(key)
   if state.screen == "playing" then
-    if key == "escape" then
+    if key == "z" or key == "space" or key == "return" then
+      state.game:interact()
+    elseif key == "escape" then
       show_idle()
     elseif key == "f11" then
       love.window.setFullscreen(not love.window.getFullscreen())

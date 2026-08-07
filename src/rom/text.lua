@@ -77,6 +77,106 @@ function text.decode(data, offset, length)
   return table.concat(out)
 end
 
+-- Dialogue is itself a small bytecode rather than a bare string. $00 opens a
+-- block, the terminators close it, and the rest control how the text box
+-- behaves: where lines break, when the box clears, when it waits for the
+-- player. Rendering these as plain newlines loses the distinction between a
+-- line break and a new box, so they are kept as structure.
+text.START = 0x00
+text.LINE = 0x4F      -- continue on the next line
+text.PARAGRAPH = 0x51 -- clear the box and carry on
+text.CONTINUE = 0x55  -- scroll and carry on
+text.DONE = 0x57      -- end of the block
+text.PROMPT = 0x58    -- wait for the player, then end
+
+text.controls = {
+  [text.START] = "start",
+  [text.LINE] = "line",
+  [text.PARAGRAPH] = "paragraph",
+  [text.CONTINUE] = "continue",
+  [text.DONE] = "done",
+  [text.PROMPT] = "prompt",
+  [text.TERMINATOR] = "done",
+}
+
+--- Decode a dialogue block into pages of lines.
+--
+-- A page is what fits in the text box at once; a paragraph control starts a new
+-- one. Returns nil when the bytes at `offset` are not dialogue, which is how
+-- callers tell a real text pointer from a coincidence.
+-- @return { pages = { { line, ... }, ... }, bytes = n, prompted = bool }
+function text.decode_dialogue(data, offset, max_bytes)
+  max_bytes = max_bytes or 2048
+
+  local pages, lines, current = {}, {}, {}
+  local letters = 0
+  local prompted = false
+
+  local function end_line()
+    lines[#lines + 1] = table.concat(current)
+    current = {}
+  end
+
+  local function end_page()
+    end_line()
+    pages[#pages + 1] = lines
+    lines = {}
+  end
+
+  for i = 0, max_bytes - 1 do
+    local at = offset + i + 1
+    local code = string.byte(data, at)
+    if not code then
+      return nil
+    end
+
+    local control = text.controls[code]
+    if control == "start" then
+      -- Only meaningful as the first byte; elsewhere it is not dialogue.
+      if i > 0 then
+        return nil
+      end
+    elseif control == "line" then
+      end_line()
+    elseif control == "continue" then
+      end_line()
+    elseif control == "paragraph" then
+      end_page()
+    elseif control == "done" or control == "prompt" then
+      prompted = control == "prompt"
+      end_page()
+      -- A block with no readable characters is not dialogue.
+      if letters == 0 then
+        return nil
+      end
+      return { pages = pages, bytes = i + 1, prompted = prompted }
+    else
+      local glyph = charmap[code]
+      if not glyph then
+        return nil
+      end
+      current[#current + 1] = glyph
+      letters = letters + 1
+    end
+  end
+
+  return nil
+end
+
+--- Flatten a decoded block to a single string, for logging and tests.
+function text.flatten(block, separator)
+  separator = separator or " / "
+  local parts = {}
+  for _, page in ipairs(block.pages) do
+    for _, line in ipairs(page) do
+      if line ~= "" then
+        parts[#parts + 1] = line
+      end
+    end
+  end
+  return table.concat(parts, separator)
+end
+
 --- Decode a terminator-delimited string.
 --
 -- Not every name table is fixed width. Species names are padded to ten bytes,

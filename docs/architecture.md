@@ -237,6 +237,47 @@ tileset's block count comes from the gap between its block and collision
 pointers. Assuming `$C0` universally stops the table at 68 of 102 entries: still
 sprites, such as an item lying on the ground, allocate `$40`.
 
+## Text, and finding an opcode by what it points at
+
+Dialogue was the one thing that needed no reverse engineering to *read*: the
+charmap was already proven by decoding all 251 species and move names, so
+scanning for long runs of readable bytes finds it directly. 4,825 strings, in
+banks scattered across the cartridge.
+
+Dialogue is not a bare string, though. It is a small bytecode: `$00` opens a
+block, `$50` and `$57` close it, and the rest describe how the text box behaves
+— `$4F` breaks a line, `$51` clears the box for a new page, `$58` waits for the
+player. Rendering all of those as newlines would lose the difference between a
+line break and a new box, so the decoder returns pages of lines and the engine
+pages through them.
+
+The interesting part was connecting scripts to that text without knowing a
+single opcode. Every signpost already had a script pointer from the event
+decoder. Taking those 792 scripts, looking for a two-byte pointer in their
+opening bytes that landed on a string the scanner had already found, and asking
+what byte sat immediately before it, gives the answer directly: `$53` accounts
+for 193 hits and `$4C` for 15. `$53` is jumptext — show a message and end.
+
+That trick generalises. When two structures are known and the mapping between
+them is not, the mapping is often recoverable by looking at what sits next to
+the known values.
+
+### What is honestly not done
+
+175 of 2,200 scripts. Signposts are mostly a single instruction and mostly
+work; NPC scripts branch, check flags, give items and move people around, and
+none of that is interpreted. The decoder deliberately reads only the first
+instruction and returns nothing rather than guessing when it sees anything else,
+so the 175 are trustworthy and the rest are visibly absent instead of quietly
+wrong.
+
+The `$4C` writetext opcode is recognised but never fires, because it appears
+mid-script rather than as the opening instruction. It stays in the table as a
+marker of where the next work starts.
+
+The text box also uses LÖVE's default font. The cartridge's own font is in bank
+`$3E` — the bank scan found it while looking for sprites — and is not wired up.
+
 ## Collision is provisional
 
 `world.WALL_COLLISION = $07` and everything else is walkable. That is not right,

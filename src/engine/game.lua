@@ -19,6 +19,14 @@ local KEYS = {
   w = "up", s = "down", a = "left", d = "right",
 }
 
+local FACING_DELTA = {
+  up = { 0, -1 }, down = { 0, 1 }, left = { -1, 0 }, right = { 1, 0 },
+}
+
+-- Text box geometry, in the 160x144 the hardware rendered.
+local BOX_HEIGHT = 48
+local BOX_MARGIN = 6
+
 --- Start a game on a cached import.
 -- @param start_index which map to spawn on; defaults to the largest town
 function game.new(game_id, start_index)
@@ -35,6 +43,9 @@ function game.new(game_id, start_index)
     message_timer = 0,
   }, game)
   instance.canvas:setFilter("nearest", "nearest")
+  -- The canvas is only 160 wide, so the box needs a font sized for it. The
+  -- cartridge's own font lives in bank $3E and is not wired up yet.
+  instance.font = love.graphics.newFont(8)
 
   instance:enter(start_index or instance:default_map())
   return instance
@@ -97,6 +108,27 @@ function game:find_spawn()
   return centre_x, centre_y
 end
 
+--- Jump to the first signpost in the game that has text and read it.
+-- Used by the screenshot mode to check the whole path from cartridge to
+-- text box without a human at the keyboard.
+-- @return true when it found one
+function game:show_first_sign()
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, bg in ipairs(map.bg_events or {}) do
+        if bg.text and #bg.text > 0 then
+          self:enter(index, bg.x, bg.y + 1, "up")
+          -- Standing below it, facing up, is how a sign is read.
+          self.dialogue = { pages = bg.text, page = 1 }
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
 function game:held_direction()
   for key, direction in pairs(KEYS) do
     if love.keyboard.isDown(key) then
@@ -111,7 +143,54 @@ function game:notify(text)
   self.message_timer = 2.5
 end
 
+--- What the player is facing, if it has something to say.
+-- @return pages, kind
+function game:facing_text()
+  local delta = FACING_DELTA[self.player.facing]
+  local x = self.player.cell_x + delta[1]
+  local y = self.player.cell_y + delta[2]
+
+  -- Signposts are read by facing them; NPCs are talked to the same way.
+  for _, bg in ipairs(self.map.bg_events or {}) do
+    if bg.x == x and bg.y == y and bg.text then
+      return bg.text, "sign"
+    end
+  end
+  for _, object in ipairs(self.map.objects or {}) do
+    if object.x == x and object.y == y and object.text then
+      return object.text, "person"
+    end
+  end
+  return nil
+end
+
+--- Interact with whatever is in front of the player, or advance the dialogue
+-- already on screen.
+function game:interact()
+  if self.dialogue then
+    self.dialogue.page = self.dialogue.page + 1
+    if self.dialogue.page > #self.dialogue.pages then
+      self.dialogue = nil
+    end
+    return
+  end
+
+  if self.player.moving then
+    return
+  end
+
+  local pages = self:facing_text()
+  if pages then
+    self.dialogue = { pages = pages, page = 1 }
+  end
+end
+
 function game:update(dt)
+  -- Movement stops while the text box is up, the way it does in the original.
+  if self.dialogue then
+    return
+  end
+
   if self.message_timer > 0 then
     self.message_timer = self.message_timer - dt
     if self.message_timer <= 0 then
@@ -221,6 +300,32 @@ function game:draw(scale)
     local offset = notch[self.player.facing]
     love.graphics.rectangle("fill",
       px - camera_x + 3 + offset[1], py - camera_y + 3 + offset[2], 4, 4)
+  end
+
+  -- The text box, drawn inside the canvas so it scales with everything else.
+  if self.dialogue then
+    local top = game.SCREEN_HEIGHT - BOX_HEIGHT
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", 0, top, game.SCREEN_WIDTH, BOX_HEIGHT)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", 2.5, top + 2.5,
+      game.SCREEN_WIDTH - 5, BOX_HEIGHT - 5)
+
+    local page = self.dialogue.pages[self.dialogue.page] or {}
+    local previous_font = love.graphics.getFont()
+    love.graphics.setFont(self.font)
+    local line_height = self.font:getHeight() + 1
+    for i, line in ipairs(page) do
+      love.graphics.print(line, BOX_MARGIN, top + 6 + (i - 1) * line_height)
+    end
+
+    -- The little marker showing there is more to read.
+    if self.dialogue.page < #self.dialogue.pages then
+      love.graphics.rectangle("fill", game.SCREEN_WIDTH - 10,
+        game.SCREEN_HEIGHT - 10, 4, 4)
+    end
+    love.graphics.setFont(previous_font)
+    love.graphics.setColor(1, 1, 1)
   end
 
   love.graphics.setCanvas()

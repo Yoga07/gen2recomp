@@ -22,6 +22,8 @@ local tilesets = require("src.rom.tilesets")
 local maps = require("src.rom.maps")
 local events = require("src.rom.events")
 local ow_sprites = require("src.rom.ow_sprites")
+local scripts = require("src.rom.scripts")
+local text = require("src.rom.text")
 
 local harness = {}
 
@@ -769,6 +771,85 @@ local function test_ow_sprites(rom, map_result)
   end
 end
 
+--- Dialogue and the scripts that show it.
+--
+-- The charmap is already proven by the name tables, so what is being checked
+-- here is the dialogue bytecode around it — where lines and pages break, where
+-- a block ends — and that the script opcode really does point at text.
+local function test_scripts(rom, map_result)
+  log("\n== scripts and text ==")
+  if not map_result then
+    log("  SKIP  maps were not located")
+    return
+  end
+
+  local read, total = 0, 0
+  local pages_total, empty_blocks = 0, 0
+  local samples = {}
+  local by_opcode = {}
+
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local said = scripts.read_map_text(rom, header, decoded)
+      read = read + said.understood
+      total = total + said.total
+
+      for _, group in ipairs { said.bg, said.objects } do
+        for _, found in pairs(group) do
+          by_opcode[found.opcode_name] = (by_opcode[found.opcode_name] or 0) + 1
+          pages_total = pages_total + #found.block.pages
+
+          local flat = text.flatten(found.block)
+          if flat == "" then
+            empty_blocks = empty_blocks + 1
+          elseif #samples < 6 then
+            samples[#samples + 1] = flat
+          end
+        end
+      end
+    end
+  end
+
+  check("scripts resolve to text", read > 100,
+    ("%d of %d scripts read as text"):format(read, total))
+  log("        %d of %d scripts are a single text instruction", read, total)
+
+  local opcode_list = {}
+  for name, count in pairs(by_opcode) do
+    opcode_list[#opcode_list + 1] = ("%s x%d"):format(name, count)
+  end
+  table.sort(opcode_list)
+  log("        %s", table.concat(opcode_list, ", "))
+
+  check_equal("no decoded block is empty", empty_blocks, 0)
+  check("every block has at least one page", pages_total >= read,
+    ("%d pages across %d blocks"):format(pages_total, read))
+
+  -- Content check. Signposts in Crystal name routes, cities and towns; if the
+  -- charmap or the page splitting were wrong these would not read as words.
+  local landmarks = 0
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local said = scripts.read_map_text(rom, header, decoded)
+      for _, found in pairs(said.bg) do
+        local flat = text.flatten(found.block)
+        if flat:find("ROUTE") or flat:find("CITY") or flat:find("TOWN") then
+          landmarks = landmarks + 1
+        end
+      end
+    end
+  end
+  check("signposts name routes, cities and towns", landmarks >= 20,
+    ("%d landmark signs"):format(landmarks))
+
+  log("        sample dialogue:")
+  for _, sample in ipairs(samples) do
+    log("          %s", sample:sub(1, 72))
+  end
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -918,6 +999,7 @@ function harness.run(rom_path, report_path)
     local map_result = test_maps(rom, tileset_result)
     test_events(rom, map_result)
     test_ow_sprites(rom, map_result)
+    test_scripts(rom, map_result)
     rom:release()
     test_engine()
   end
