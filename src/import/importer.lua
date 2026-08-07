@@ -19,6 +19,7 @@ local scripts = require("src.rom.scripts")
 local font = require("src.rom.font")
 local encounters = require("src.rom.encounters")
 local trainers = require("src.rom.trainers")
+local learnsets = require("src.rom.learnsets")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -200,7 +201,7 @@ function importer.run(path, progress)
 
   -- Wild encounters and trainer parties: what the battle system will need.
   step("locating wild encounters")
-  local battle_summary = { grass = 0, water = 0, trainers = 0 }
+  local battle_summary = { grass = 0, water = 0, trainers = 0, learnsets = 0 }
 
   local grass, grass_err = encounters.locate_grass(rom)
   if not grass then
@@ -230,6 +231,16 @@ function importer.run(path, progress)
     battle_summary.water = #records
     offsets.water_encounters = water[1].offset
     cache.write(descriptor.game, "water_encounters", records)
+  end
+
+  step("locating learnsets")
+  local learnset_result, learnset_err = learnsets.locate(rom)
+  if not learnset_result then
+    failed.learnsets = learnset_err
+  else
+    offsets.learnsets = learnset_result.offset
+    battle_summary.learnsets = #learnset_result.records
+    cache.write(descriptor.game, "learnsets", learnset_result.records)
   end
 
   step("locating trainer parties")
@@ -517,9 +528,10 @@ function importer.format_report(report)
   end
 
   if report.battle_data then
-    lines[#lines + 1] = ("  %-16s %4d grass maps, %d water maps, %d trainers")
-      :format("battle data", report.battle_data.grass, report.battle_data.water,
-        report.battle_data.trainers)
+    lines[#lines + 1] = ("  %-16s %4d grass maps, %d water maps, %d trainers, " ..
+      "%d learnsets"):format("battle data", report.battle_data.grass,
+      report.battle_data.water, report.battle_data.trainers,
+      report.battle_data.learnsets)
   end
 
   if report.ow_sprites then

@@ -1264,6 +1264,93 @@ local function test_battle(base_stats, move_records, species_names, move_names)
   end
 end
 
+--- Level-up learnsets and evolutions.
+local function test_learnsets(rom, species_names, move_names)
+  log("\n== learnsets ==")
+
+  local learnsets = require("src.rom.learnsets")
+  local result, why = learnsets.locate(rom)
+  if not check("located the learnset table", result ~= nil, why) then
+    return
+  end
+
+  log("        0x%06X (bank $%02X), %d species",
+    result.offset, math.floor(result.offset / 0x4000), #result.records)
+  check_equal("one block per species", #result.records, 251)
+
+  local names = species_names or {}
+  local moves = move_names or {}
+
+  -- Bulbasaur, whose first two moves and evolution are not in dispute.
+  local bulbasaur = result.records[1]
+  check_equal("Bulbasaur's first move is at level 1", bulbasaur.moves[1].level, 1)
+  check_equal("Bulbasaur starts with Tackle",
+    moves[bulbasaur.moves[1].move], "TACKLE")
+  check_equal("Bulbasaur learns Growl at 4", bulbasaur.moves[2].level, 4)
+  check_equal("Bulbasaur's second move is Growl",
+    moves[bulbasaur.moves[2].move], "GROWL")
+  check_equal("Bulbasaur has one evolution", #bulbasaur.evolutions, 1)
+  check_equal("Bulbasaur evolves by level", bulbasaur.evolutions[1].method, "level")
+  check_equal("Bulbasaur evolves at 16", bulbasaur.evolutions[1].level, 16)
+  check_equal("Bulbasaur evolves into Ivysaur",
+    names[bulbasaur.evolutions[1].into], "IVYSAUR")
+
+  -- Structural checks across the whole table.
+  local no_moves, bad_levels, total_moves = 0, 0, 0
+  local with_evolutions = 0
+  local methods = {}
+  for _, record in ipairs(result.records) do
+    if #record.moves == 0 then
+      no_moves = no_moves + 1
+    end
+    total_moves = total_moves + #record.moves
+    for _, entry in ipairs(record.moves) do
+      if entry.level < 1 or entry.level > 100 then
+        bad_levels = bad_levels + 1
+      end
+    end
+    if #record.evolutions > 0 then
+      with_evolutions = with_evolutions + 1
+    end
+    for _, evolution in ipairs(record.evolutions) do
+      methods[evolution.method] = (methods[evolution.method] or 0) + 1
+    end
+  end
+
+  check_equal("every species learns something", no_moves, 0)
+  check_equal("every learn level is in range", bad_levels, 0)
+  log("        %d level-up moves in total, %d species evolve",
+    total_moves, with_evolutions)
+
+  local method_list = {}
+  for method, count in pairs(methods) do
+    method_list[#method_list + 1] = ("%s x%d"):format(method, count)
+  end
+  table.sort(method_list)
+  log("        evolution methods: %s", table.concat(method_list, ", "))
+
+  -- Every method Gen 2 has should appear somewhere.
+  check("stone evolutions exist", (methods.item or 0) > 0)
+  check("trade evolutions exist", (methods.trade or 0) > 0)
+  check("happiness evolutions exist", (methods.happiness or 0) > 0)
+  -- Tyrogue is the only species that evolves on a stat comparison.
+  check("the stat-comparison evolution exists", (methods.stat or 0) > 0)
+
+  -- Moves known at a level: the last four learned at or below it.
+  local at_five = learnsets.moves_at(bulbasaur, 5)
+  check("Bulbasaur knows two moves at level 5", #at_five == 2,
+    ("knows %d"):format(#at_five))
+  local at_hundred = learnsets.moves_at(bulbasaur, 100)
+  check_equal("a Pokémon never knows more than four moves", #at_hundred, 4)
+
+  local sample = {}
+  for _, move in ipairs(at_hundred) do
+    sample[#sample + 1] = moves[move] or ("#" .. move)
+  end
+  log("        %s at L100 knows: %s", names[1] or "?",
+    table.concat(sample, ", "))
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1515,6 +1602,9 @@ function harness.run(rom_path, report_path)
     test_battle_data(rom, found and found.species_names and found.species_names.records)
     test_pokemon(found and found.base_stats,
       found and found.species_names and found.species_names.records)
+    test_learnsets(rom,
+      found and found.species_names and found.species_names.records,
+      found and found.move_names and found.move_names.records)
     test_battle(found and found.base_stats, found and found.moves,
       found and found.species_names and found.species_names.records,
       found and found.move_names and found.move_names.records)

@@ -56,6 +56,7 @@ function game.new(game_id, start_index)
   instance.base_stats = cache.read(game_id, "base_stats")
   instance.move_records = cache.read(game_id, "moves")
   instance.move_name_records = cache.read(game_id, "move_names")
+  instance.learnset_records = cache.read(game_id, "learnsets")
 
   instance:enter(start_index or instance:default_map())
   return instance
@@ -324,7 +325,7 @@ function game:party_leader()
     end
     self.party_member = pokemon.new(155, base, { level = 10 })
     self.party_member.moves =
-      pokemon.default_moves(self.party_member, self.move_records or {})
+      pokemon.moves_from_learnset(self.party_member, self.learnset_records)
   end
   return self.party_member
 end
@@ -337,7 +338,7 @@ function game:wild_encounter(met)
   end
 
   local opponent = pokemon.wild(met.species, base, met.level)
-  opponent.moves = pokemon.default_moves(opponent, self.move_records or {})
+  opponent.moves = pokemon.moves_from_learnset(opponent, self.learnset_records)
 
   -- Heal the player's Pokémon between encounters; there is nowhere to rest yet.
   leader.hp = leader.stats.hp

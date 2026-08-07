@@ -29,6 +29,7 @@ engine does not exist yet.
 | Overworld sprites: player and NPCs | working, 102 sprites |
 | Wild encounters, grass and water | working — 91 and 62 maps |
 | Trainer parties | working — 532 trainers |
+| Learnsets and evolutions | working — 2215 moves, 113 evolutions |
 | Dialogue text and charmap | working |
 | Font | working — the one hardcoded offset, see docs |
 | Collision: terrain classification | working |
@@ -37,7 +38,7 @@ engine does not exist yet.
 | **Engine:** Pokémon stats and party | working |
 | **Engine:** battles — types, damage, turn order | working |
 | Map scripts | walked for text: 480 of 2200 |
-| Level-up learnsets | not extracted — movesets are a stand-in |
+| Level-up learnsets and evolutions | working — 251 species |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Script bytecode beyond text | not started |
 | Status conditions, stat stages, catching, items | not started |
@@ -49,7 +50,7 @@ the arrow keys or WASD; doors warp between maps, and the player and NPCs are
 drawn with the cartridge's own sprites. Press Z or space to read a signpost or
 talk to someone. Walking in tall grass starts a battle — Z advances a turn.
 
-181 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+199 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
