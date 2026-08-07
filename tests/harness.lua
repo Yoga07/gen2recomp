@@ -26,6 +26,8 @@ local scripts = require("src.rom.scripts")
 local text = require("src.rom.text")
 local font = require("src.rom.font")
 local script_table = require("src.rom.script_table")
+local encounters = require("src.rom.encounters")
+local trainers = require("src.rom.trainers")
 
 local harness = {}
 
@@ -957,6 +959,124 @@ local function test_script_table(rom, map_result)
     counts.ended >= 700, ("%d of %d"):format(counts.ended, #extents))
 end
 
+--- Wild encounters and trainer parties.
+--
+-- Checked against content that is a matter of public record: the gym leaders'
+-- teams, and the fact that starters and legendaries do not appear in grass.
+-- The structures come from a disassembly, so these tests exist to confirm the
+-- tables were located in *this* cartridge, not to restate the documentation.
+local function test_battle_data(rom, species_names)
+  log("\n== wild encounters ==")
+
+  local grass, grass_err = encounters.locate_grass(rom)
+  if check("located grass encounter tables", grass ~= nil, grass_err) then
+    local maps, bad_species, bad_levels = 0, 0, 0
+    local seen = {}
+    for _, run in ipairs(grass) do
+      log("        0x%06X (bank $%02X): %d maps",
+        run.offset, math.floor(run.offset / 0x4000), run.count)
+      for _, entry in ipairs(run.entries) do
+        maps = maps + 1
+        for _, time in ipairs(encounters.times) do
+          for _, slot in ipairs(entry.slots[time]) do
+            seen[slot.species] = true
+            if slot.species < 1 or slot.species > 251 then
+              bad_species = bad_species + 1
+            end
+            if slot.level < 2 or slot.level > 70 then
+              bad_levels = bad_levels + 1
+            end
+          end
+        end
+      end
+    end
+
+    check("Crystal has grass encounters on many maps", maps >= 80,
+      ("%d maps"):format(maps))
+    check_equal("every wild species exists", bad_species, 0)
+    check_equal("every wild level is sane", bad_levels, 0)
+
+    local distinct = 0
+    for _ in pairs(seen) do
+      distinct = distinct + 1
+    end
+    log("        %d distinct species appear in grass", distinct)
+    check("a wide range of species appear in grass", distinct >= 90,
+      ("%d distinct"):format(distinct))
+
+    -- The starters are given, never found in grass.
+    check("starters do not appear in grass",
+      not seen[152] and not seen[155] and not seen[158])
+  end
+
+  local water, water_err = encounters.locate_water(rom)
+  if check("located water encounter tables", water ~= nil, water_err) then
+    local maps = 0
+    for _, run in ipairs(water) do
+      maps = maps + run.count
+    end
+    log("        %d maps with water encounters", maps)
+    check("water encounters cover a good number of maps", maps >= 40,
+      ("%d maps"):format(maps))
+  end
+
+  log("\n== trainers ==")
+  local runs, trainer_err = trainers.locate(rom)
+  if not check("located trainer parties", runs ~= nil, trainer_err) then
+    return
+  end
+
+  local all = {}
+  for _, run in ipairs(runs) do
+    for _, entry in ipairs(run.entries) do
+      all[#all + 1] = entry
+    end
+  end
+  log("        %d runs, %d trainers", #runs, #all)
+  check("Crystal has hundreds of trainers", #all >= 400,
+    ("%d trainers"):format(#all))
+
+  local by_name = {}
+  for _, trainer in ipairs(all) do
+    by_name[trainer.name] = by_name[trainer.name] or trainer
+  end
+
+  local function team_of(name)
+    local trainer = by_name[name]
+    if not trainer then
+      return nil
+    end
+    local parts = {}
+    for _, member in ipairs(trainer.party) do
+      parts[#parts + 1] = ("%d/%s"):format(member.level,
+        species_names and species_names[member.species] or member.species)
+    end
+    return table.concat(parts, " ")
+  end
+
+  -- Gym leaders, whose teams are not in dispute.
+  check_equal("Falkner's team", team_of("FALKNER"), "7/PIDGEY 9/PIDGEOTTO")
+  check_equal("Whitney's team", team_of("WHITNEY"), "18/CLEFAIRY 20/MILTANK")
+  check_equal("Bugsy's team", team_of("BUGSY"),
+    "14/METAPOD 14/KAKUNA 16/SCYTHER")
+
+  local with_moves, with_items = 0, 0
+  for _, trainer in ipairs(all) do
+    for _, member in ipairs(trainer.party) do
+      if member.moves then
+        with_moves = with_moves + 1
+      end
+      if member.item then
+        with_items = with_items + 1
+      end
+    end
+  end
+  log("        %d party members carry explicit moves, %d hold an item",
+    with_moves, with_items)
+  check("some trainers specify moves", with_moves > 100)
+  check("some trainers hold items", with_items > 10)
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1109,6 +1229,7 @@ function harness.run(rom_path, report_path)
     test_font(rom)
     test_scripts(rom, map_result)
     test_script_table(rom, map_result)
+    test_battle_data(rom, found and found.species_names and found.species_names.records)
     rom:release()
     test_engine()
   end

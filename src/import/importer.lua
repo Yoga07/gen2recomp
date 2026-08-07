@@ -17,6 +17,8 @@ local events = require("src.rom.events")
 local ow_sprites = require("src.rom.ow_sprites")
 local scripts = require("src.rom.scripts")
 local font = require("src.rom.font")
+local encounters = require("src.rom.encounters")
+local trainers = require("src.rom.trainers")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -194,6 +196,56 @@ function importer.run(path, progress)
       end
     end
     cache.write(descriptor.game, "tilesets", records)
+  end
+
+  -- Wild encounters and trainer parties: what the battle system will need.
+  step("locating wild encounters")
+  local battle_summary = { grass = 0, water = 0, trainers = 0 }
+
+  local grass, grass_err = encounters.locate_grass(rom)
+  if not grass then
+    failed.grass_encounters = grass_err
+  else
+    local records = {}
+    for _, run in ipairs(grass) do
+      for _, entry in ipairs(run.entries) do
+        records[#records + 1] = entry
+      end
+    end
+    battle_summary.grass = #records
+    offsets.grass_encounters = grass[1].offset
+    cache.write(descriptor.game, "grass_encounters", records)
+  end
+
+  local water, water_err = encounters.locate_water(rom)
+  if not water then
+    failed.water_encounters = water_err
+  else
+    local records = {}
+    for _, run in ipairs(water) do
+      for _, entry in ipairs(run.entries) do
+        records[#records + 1] = entry
+      end
+    end
+    battle_summary.water = #records
+    offsets.water_encounters = water[1].offset
+    cache.write(descriptor.game, "water_encounters", records)
+  end
+
+  step("locating trainer parties")
+  local trainer_runs, trainer_err = trainers.locate(rom)
+  if not trainer_runs then
+    failed.trainers = trainer_err
+  else
+    local records = {}
+    for _, run in ipairs(trainer_runs) do
+      for _, entry in ipairs(run.entries) do
+        records[#records + 1] = entry
+      end
+    end
+    battle_summary.trainers = #records
+    offsets.trainers = trainer_runs[1].offset
+    cache.write(descriptor.game, "trainers", records)
   end
 
   -- The font, so the engine can draw text in the cartridge's own letters.
@@ -384,6 +436,7 @@ function importer.run(path, progress)
     tilesets = tileset_summary,
     maps = map_summary,
     ow_sprites = ow_summary,
+    battle_data = battle_summary,
     sha1 = sha1,
   }
 end
@@ -413,6 +466,12 @@ function importer.format_report(report)
   if report.sprites then
     lines[#lines + 1] = ("  %-16s %4d sprites written, %d failed")
       :format("sprites", report.sprites.written, report.sprites.failed)
+  end
+
+  if report.battle_data then
+    lines[#lines + 1] = ("  %-16s %4d grass maps, %d water maps, %d trainers")
+      :format("battle data", report.battle_data.grass, report.battle_data.water,
+        report.battle_data.trainers)
   end
 
   if report.ow_sprites then

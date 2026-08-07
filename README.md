@@ -30,6 +30,8 @@ engine does not exist yet.
 | Collision | provisional — see below |
 | Overworld sprites: player and NPCs | working, 102 sprites |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
+| Wild encounters, grass and water | working — 91 and 62 maps |
+| Trainer parties | working — 532 trainers |
 | Dialogue text and charmap | working |
 | Font | working — the one hardcoded offset, see docs |
 | Map scripts | walked for text: 480 of 2200 |
@@ -42,7 +44,7 @@ You can walk around. Import a cartridge, press enter, and move with the arrow
 keys or WASD; doors warp between maps, and the player and NPCs are drawn with
 the cartridge's own sprites. Press Z or space to read a signpost.
 
-120 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+143 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
@@ -62,6 +64,9 @@ itself and does not depend on them:
 | Map headers | `0x094034` | `$25` |
 | Map group pointers | `0x094000` | `$25` |
 | Overworld sprite table | `0x014736` | `$05` |
+| Grass encounters | `0x02A5E9` | `$0A` |
+| Water encounters | `0x02B11D` | `$0A` |
+| Trainer parties | `0x039A1F` | `$0E` |
 
 ## Requirements
 
