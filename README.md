@@ -24,28 +24,28 @@ engine does not exist yet.
 | Pokémon front and back sprites | working, 250 of 251 species |
 | Sprite palettes, normal and shiny | working |
 | Tilesets: graphics, blocks, collision | working, 31 tilesets |
-| Maps: headers, dimensions, block data, connections | working, 384 maps |
-| Map events: warps, triggers, signposts, NPCs | working, all 384 maps |
-| Overworld: rendering, grid movement, warps | working |
-| Collision: terrain classification | working |
-| Wild encounter trigger | working — grass, and cave floor |
+| Maps: headers, dimensions, block data, connections | working, 388 slots / 384 usable |
+| Map events: warps, triggers, signposts, NPCs | working |
 | Overworld sprites: player and NPCs | working, 102 sprites |
-| Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Wild encounters, grass and water | working — 91 and 62 maps |
 | Trainer parties | working — 532 trainers |
 | Dialogue text and charmap | working |
 | Font | working — the one hardcoded offset, see docs |
+| Collision: terrain classification | working |
+| **Engine:** overworld rendering, movement, warps | working |
+| **Engine:** wild encounter trigger | working — grass, and cave floor |
+| **Engine:** Pokémon stats and party | working |
 | Map scripts | walked for text: 480 of 2200 |
+| Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Script bytecode beyond text | not started |
-| Battles, menus, audio | not started |
-| Audio | not started |
-| Engine (overworld, battle, menus) | not started |
+| Battles, menus, save, audio | not started |
+| Map edge connections | extracted, not implemented |
 
 You can walk around. Import a cartridge, press enter, and move with the arrow
 keys or WASD; doors warp between maps, and the player and NPCs are drawn with
 the cartridge's own sprites. Press Z or space to read a signpost.
 
-148 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+161 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

@@ -8,6 +8,7 @@ local world = require("src.engine.world")
 local player = require("src.engine.player")
 local cache = require("src.import.cache")
 local wild = require("src.engine.wild")
+local pokemon = require("src.engine.pokemon")
 
 local game = {}
 game.__index = game
@@ -51,6 +52,7 @@ function game.new(game_id, start_index)
   -- LOVE's font rather than refusing to show text.
   instance.bitmap_font = require("src.engine.bitmap_font").load(game_id)
   instance.species_names = cache.read(game_id, "species_names")
+  instance.base_stats = cache.read(game_id, "base_stats")
 
   instance:enter(start_index or instance:default_map())
   return instance
@@ -301,16 +303,31 @@ function game:wild_encounter(met)
   local names = self.species_names or {}
   local name = names[met.species] or ("#" .. met.species)
 
-  self.dialogue = {
-    pages = {
-      {
-        { text = "Wild " .. name .. "", codes = self:encode(("Wild %s"):format(name)) },
-        { text = ("appeared!  L%d"):format(met.level),
-          codes = self:encode(("appeared!  L%d"):format(met.level)) },
-      },
-    },
-    page = 1,
+  -- Build the actual Pokémon: DVs are rolled now, and everything else follows
+  -- from them and the species' base stats.
+  local base = self.base_stats and self.base_stats[met.species]
+  if base then
+    self.wild = pokemon.wild(met.species, base, met.level)
+  end
+
+  local lines = {
+    ("Wild %s"):format(name),
+    ("appeared!  L%d"):format(met.level),
   }
+  if self.wild then
+    lines[#lines + 1] = ("HP %d  ATK %d")
+      :format(self.wild.stats.hp, self.wild.stats.attack)
+    if self.wild.shiny then
+      lines[#lines + 1] = "It is shiny!"
+    end
+  end
+
+  local page = {}
+  for _, line in ipairs(lines) do
+    page[#page + 1] = { text = line, codes = self:encode(line) }
+  end
+
+  self.dialogue = { pages = { page }, page = 1 }
 end
 
 --- Encode plain ASCII into the cartridge's character codes, so runtime messages

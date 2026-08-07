@@ -1077,6 +1077,86 @@ local function test_battle_data(rom, species_names)
   check("some trainers hold items", with_items > 10)
 end
 
+--- Stat calculation, checked against values that can be worked out by hand
+--- from the published formula.
+local function test_pokemon(base_stats, species_names)
+  log("\n== pokemon stats ==")
+  if not base_stats then
+    log("  SKIP  base stats were not located")
+    return
+  end
+
+  local pokemon = require("src.engine.pokemon")
+  local stats = base_stats.records
+
+  -- Pikachu at level 5 with perfect DVs. Base HP 35, attack 55.
+  -- HP    = floor((35+15)*2*5/100) + 5 + 10 = 5 + 15 = 20
+  -- attack= floor((55+15)*2*5/100) + 5      = 7 + 5  = 12
+  local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
+  local pikachu = pokemon.new(25, stats[25], { level = 5, dvs = perfect })
+  check_equal("Pikachu L5 perfect HP", pikachu.stats.hp, 20)
+  check_equal("Pikachu L5 perfect attack", pikachu.stats.attack, 12)
+  check_equal("a fresh Pokémon is at full health", pikachu.hp, pikachu.stats.hp)
+
+  -- The HP DV is assembled from the low bit of the other four, so all-perfect
+  -- gives 15 and all-even gives 0.
+  check_equal("perfect DVs give an HP DV of 15", pokemon.hp_dv(perfect), 15)
+  check_equal("even DVs give an HP DV of 0",
+    pokemon.hp_dv { attack = 14, defense = 10, speed = 4, special = 0 }, 0)
+
+  -- Blissey at level 100 with perfect DVs and no training:
+  -- floor(((255+15)*2)*100/100) + 100 + 10 = 540 + 110 = 650.
+  local blissey = pokemon.new(242, stats[242], { level = 100, dvs = perfect })
+  check_equal("Blissey L100 perfect HP, untrained", blissey.stats.hp, 650)
+
+  -- Fully trained, stat experience adds floor(sqrt(65535)/4) = 63 to the term,
+  -- which is the only path that exercises the statexp branch.
+  local trained = pokemon.new(242, stats[242], {
+    level = 100, dvs = perfect,
+    statexp = { hp = 65535 },
+  })
+  check_equal("Blissey L100 perfect HP, fully trained", trained.stats.hp, 713)
+  check("training raises HP", trained.stats.hp > blissey.stats.hp)
+
+  -- Stats must rise with level and never with nothing else changing.
+  local low = pokemon.new(25, stats[25], { level = 5, dvs = perfect })
+  local high = pokemon.new(25, stats[25], { level = 50, dvs = perfect })
+  check("stats rise with level", high.stats.attack > low.stats.attack,
+    ("%d vs %d"):format(high.stats.attack, low.stats.attack))
+
+  -- Shininess is a DV pattern, not a flag.
+  check("the shiny DV pattern is recognised",
+    pokemon.is_shiny { attack = 14, defense = 10, speed = 10, special = 10 })
+  check("ordinary DVs are not shiny",
+    not pokemon.is_shiny { attack = 5, defense = 5, speed = 5, special = 5 })
+
+  -- Types come from the species record.
+  check_equal("Pikachu is electric", pikachu.types[1], "electric")
+
+  -- Every species must produce sane stats at both ends of the level range.
+  local bad = 0
+  for species = 1, #stats do
+    for _, level in ipairs { 2, 100 } do
+      local instance = pokemon.new(species, stats[species],
+        { level = level, dvs = perfect })
+      for _, stat in ipairs(pokemon.STATS) do
+        local value = instance.stats[stat]
+        if value < 1 or value > 999 then
+          bad = bad + 1
+        end
+      end
+    end
+  end
+  check_equal("every species has usable stats at levels 2 and 100", bad, 0)
+  log("        %d species checked", #stats)
+
+  if species_names then
+    log("        %s L5: HP %d ATK %d DEF %d SPD %d",
+      species_names[25], pikachu.stats.hp, pikachu.stats.attack,
+      pikachu.stats.defense, pikachu.stats.speed)
+  end
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1326,6 +1406,8 @@ function harness.run(rom_path, report_path)
     test_scripts(rom, map_result)
     test_script_table(rom, map_result)
     test_battle_data(rom, found and found.species_names and found.species_names.records)
+    test_pokemon(found and found.base_stats,
+      found and found.species_names and found.species_names.records)
     rom:release()
     test_engine()
   end
