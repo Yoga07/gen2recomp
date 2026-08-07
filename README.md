@@ -31,6 +31,7 @@ engine does not exist yet.
 | Overworld sprites: player and NPCs | working, 102 sprites |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Dialogue text and charmap | working |
+| Font | working — the one hardcoded offset, see docs |
 | Map scripts | text-only: 175 of 2200 read |
 | Script bytecode beyond text | not started |
 | Battles, menus, audio | not started |
@@ -41,7 +42,7 @@ You can walk around. Import a cartridge, press enter, and move with the arrow
 keys or WASD; doors warp between maps, and the player and NPCs are drawn with
 the cartridge's own sprites. Press Z or space to read a signpost.
 
-113 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+120 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

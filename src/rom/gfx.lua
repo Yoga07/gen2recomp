@@ -34,6 +34,46 @@ function gfx.decode_tile(data, offset, out)
   return out
 end
 
+gfx.BYTES_PER_TILE_1BPP = 8
+
+--- Decode one 8x8 tile stored as 1bpp.
+--
+-- The font is stored this way: one byte per row, one bit per pixel, no second
+-- bitplane. Reading it as 2bpp silently pairs each glyph with its neighbour —
+-- the low plane is one character and the high plane the next — which produces
+-- letters that are almost but not quite right, and is easy to mistake for a
+-- palette problem rather than a format one.
+--
+-- Returned in the same 0-3 index space as 2bpp so the same renderers work: set
+-- pixels become index 3, clear ones index 0.
+function gfx.decode_tile_1bpp(data, offset, out)
+  out = out or {}
+  local i = 1
+  for row = 0, 7 do
+    local bits = string.byte(data, offset + row + 1)
+    if not bits then
+      return nil, ("1bpp tile at 0x%06X is truncated"):format(offset)
+    end
+    for bit_index = 7, 0, -1 do
+      out[i] = bytes.band(bytes.rshift(bits, bit_index), 1) == 1 and 3 or 0
+      i = i + 1
+    end
+  end
+  return out
+end
+
+function gfx.decode_tiles_1bpp(data, offset, count)
+  local tiles = {}
+  for i = 0, count - 1 do
+    local tile, err = gfx.decode_tile_1bpp(data, offset + i * gfx.BYTES_PER_TILE_1BPP)
+    if not tile then
+      return nil, err
+    end
+    tiles[i + 1] = tile
+  end
+  return tiles
+end
+
 --- Decode a run of consecutive tiles.
 -- @return array of tiles, each a flat 64-entry array of palette indices.
 function gfx.decode_tiles(data, offset, count)

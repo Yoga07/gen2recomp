@@ -24,6 +24,7 @@ local events = require("src.rom.events")
 local ow_sprites = require("src.rom.ow_sprites")
 local scripts = require("src.rom.scripts")
 local text = require("src.rom.text")
+local font = require("src.rom.font")
 
 local harness = {}
 
@@ -771,6 +772,64 @@ local function test_ow_sprites(rom, map_result)
   end
 end
 
+--- The font. Checked by glyph layout rather than by shape, since we have no
+-- reference image to compare against; the shapes were confirmed by rendering a
+-- signpost's text and reading it.
+local function test_font(rom)
+  log("\n== font ==")
+
+  local located, why = font.locate(rom, "crystal")
+  if not check("located the font", located ~= nil, why) then
+    return
+  end
+
+  log("        offset 0x%06X (bank $%02X), found by %s",
+    located.offset, math.floor(located.offset / 0x4000), located.source)
+
+  local glyphs = font.decode(rom, located)
+  if not check("the font decodes as 1bpp tiles", glyphs ~= nil) then
+    return
+  end
+  check_equal("the sheet holds 256 glyphs", #glyphs, font.GLYPH_COUNT)
+
+  local function ink(code)
+    local tile = glyphs[font.tile_for(code) + 1]
+    if not tile then
+      return nil
+    end
+    local set = 0
+    for i = 1, 64 do
+      if tile[i] ~= 0 then
+        set = set + 1
+      end
+    end
+    return set
+  end
+
+  check_equal("the space glyph is blank", ink(text.charmap and 0x7F or 0x7F), 0)
+
+  local blank_letters = 0
+  for code = 0x80, 0x99 do
+    if (ink(code) or 0) == 0 then
+      blank_letters = blank_letters + 1
+    end
+  end
+  check_equal("no uppercase letter is blank", blank_letters, 0)
+
+  local blank_digits = 0
+  for code = 0xF6, 0xFF do
+    if (ink(code) or 0) == 0 then
+      blank_digits = blank_digits + 1
+    end
+  end
+  check_equal("no digit is blank", blank_digits, 0)
+
+  -- 'I' is a bar and 'M' is dense; if the bias were off by even one tile this
+  -- ordering would not survive.
+  check("'I' carries less ink than 'M'", (ink(0x88) or 0) < (ink(0x8C) or 0),
+    ("I=%d M=%d"):format(ink(0x88) or -1, ink(0x8C) or -1))
+end
+
 --- Dialogue and the scripts that show it.
 --
 -- The charmap is already proven by the name tables, so what is being checked
@@ -999,6 +1058,7 @@ function harness.run(rom_path, report_path)
     local map_result = test_maps(rom, tileset_result)
     test_events(rom, map_result)
     test_ow_sprites(rom, map_result)
+    test_font(rom)
     test_scripts(rom, map_result)
     rom:release()
     test_engine()

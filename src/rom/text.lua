@@ -108,13 +108,17 @@ text.controls = {
 function text.decode_dialogue(data, offset, max_bytes)
   max_bytes = max_bytes or 2048
 
-  local pages, lines, current = {}, {}, {}
+  local pages, lines, current, current_codes = {}, {}, {}, {}
   local letters = 0
   local prompted = false
 
+  -- Each line keeps both the rendered string and the raw character codes. The
+  -- string is for logs and tests; the codes are what a bitmap font needs, since
+  -- glyphs like "é" and "♀" are multi-byte once rendered and cannot be indexed
+  -- back to a tile.
   local function end_line()
-    lines[#lines + 1] = table.concat(current)
-    current = {}
+    lines[#lines + 1] = { text = table.concat(current), codes = current_codes }
+    current, current_codes = {}, {}
   end
 
   local function end_page()
@@ -156,6 +160,7 @@ function text.decode_dialogue(data, offset, max_bytes)
         return nil
       end
       current[#current + 1] = glyph
+      current_codes[#current_codes + 1] = code
       letters = letters + 1
     end
   end
@@ -169,8 +174,8 @@ function text.flatten(block, separator)
   local parts = {}
   for _, page in ipairs(block.pages) do
     for _, line in ipairs(page) do
-      if line ~= "" then
-        parts[#parts + 1] = line
+      if line.text ~= "" then
+        parts[#parts + 1] = line.text
       end
     end
   end

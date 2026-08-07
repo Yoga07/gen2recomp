@@ -275,8 +275,39 @@ The `$4C` writetext opcode is recognised but never fires, because it appears
 mid-script rather than as the opening instruction. It stays in the table as a
 marker of where the next work starts.
 
-The text box also uses LÖVE's default font. The cartridge's own font is in bank
-`$3E` — the bank scan found it while looking for sprites — and is not wired up.
+## The font, and the one hardcoded offset
+
+The font is 1bpp: one byte per row, one bit per pixel. Reading it as 2bpp pairs
+each glyph with its neighbour, one into each bitplane, and produces an alphabet
+that is *almost* right — which looks like a palette problem and is a format
+problem. A character's tile is its code minus `$40`.
+
+**This is the only hardcoded offset in the project, and it is deliberate.**
+
+Everything else is found by search, because a wrong hardcoded offset yields
+plausible garbage rather than an error. The font defeated that. Ink density
+alone matches 28 offsets. Adding spatial coherence left exactly one — in bank
+`$5C`, and it was wrong, which is the worst possible outcome: a confident,
+unique, incorrect answer. Adding letterform relations left three, none of them
+the font.
+
+The reason is structural. Every other table validates against something: a
+length field, a pointer that must resolve, a second record that has to agree. A
+font is just pixels, and plenty of other pixels look similar under every cheap
+measure. There is nothing for a search to check itself against.
+
+So the offset is asserted and then verified, and the blind search survives as a
+fallback that reports loudly rather than guessing. The verification is
+deliberately looser than the search heuristics — holding the real font to tuned
+thresholds is exactly what rejected it.
+
+Two method notes worth keeping. The bias was first read off a 128-pixel-wide
+render by counting rows, which gave `$60` and was wrong by two rows; measuring
+per-tile ink and looking for the blank space glyph gave `$40`. And the way it
+was finally settled was rendering a string whose correct appearance was known —
+"ROUTE 38", lifted from a signpost the script decoder had already read — at
+every candidate bias and seeing which row came out legible. When a heuristic
+keeps producing confident wrong answers, render the thing and look at it.
 
 ## Collision is provisional
 

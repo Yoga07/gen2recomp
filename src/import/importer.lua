@@ -16,6 +16,7 @@ local maps = require("src.rom.maps")
 local events = require("src.rom.events")
 local ow_sprites = require("src.rom.ow_sprites")
 local scripts = require("src.rom.scripts")
+local font = require("src.rom.font")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -193,6 +194,19 @@ function importer.run(path, progress)
       end
     end
     cache.write(descriptor.game, "tilesets", records)
+  end
+
+  -- The font, so the engine can draw text in the cartridge's own letters.
+  step("locating the font")
+  local font_result, font_err = font.locate(rom, descriptor.game)
+  if not font_result then
+    failed.font = font_err
+  else
+    offsets.font = font_result.offset
+    local glyphs = font.decode(rom, font_result)
+    if glyphs then
+      cache.write_image(descriptor.game, "font", font.to_image_data(glyphs))
+    end
   end
 
   -- Overworld sprites: the player and the NPCs.

@@ -20,6 +20,7 @@ local HEADLESS = {
   ["--probe-collision"] = "tests.probe_collision",
   ["--probe-ow-sprites"] = "tests.probe_ow_sprites",
   ["--probe-text"] = "tests.probe_text",
+  ["--probe-font"] = "tests.probe_font",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }

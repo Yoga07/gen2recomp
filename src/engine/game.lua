@@ -46,6 +46,9 @@ function game.new(game_id, start_index)
   -- The canvas is only 160 wide, so the box needs a font sized for it. The
   -- cartridge's own font lives in bank $3E and is not wired up yet.
   instance.font = love.graphics.newFont(8)
+  -- The cartridge's own font, when the import produced one. Falls back to
+  -- LOVE's font rather than refusing to show text.
+  instance.bitmap_font = require("src.engine.bitmap_font").load(game_id)
 
   instance:enter(start_index or instance:default_map())
   return instance
@@ -312,19 +315,29 @@ function game:draw(scale)
       game.SCREEN_WIDTH - 5, BOX_HEIGHT - 5)
 
     local page = self.dialogue.pages[self.dialogue.page] or {}
-    local previous_font = love.graphics.getFont()
-    love.graphics.setFont(self.font)
-    local line_height = self.font:getHeight() + 1
-    for i, line in ipairs(page) do
-      love.graphics.print(line, BOX_MARGIN, top + 6 + (i - 1) * line_height)
+
+    if self.bitmap_font then
+      local line_height = self.bitmap_font:height() + 4
+      for i, line in ipairs(page) do
+        self.bitmap_font:draw_codes(line.codes, BOX_MARGIN,
+          top + 8 + (i - 1) * line_height)
+      end
+    else
+      local previous_font = love.graphics.getFont()
+      love.graphics.setFont(self.font)
+      local line_height = self.font:getHeight() + 1
+      for i, line in ipairs(page) do
+        love.graphics.print(line.text, BOX_MARGIN, top + 6 + (i - 1) * line_height)
+      end
+      love.graphics.setFont(previous_font)
     end
 
     -- The little marker showing there is more to read.
     if self.dialogue.page < #self.dialogue.pages then
+      love.graphics.setColor(0.1, 0.1, 0.1)
       love.graphics.rectangle("fill", game.SCREEN_WIDTH - 10,
         game.SCREEN_HEIGHT - 10, 4, 4)
     end
-    love.graphics.setFont(previous_font)
     love.graphics.setColor(1, 1, 1)
   end
 
