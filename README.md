@@ -28,8 +28,8 @@ engine does not exist yet.
 | Map events: warps, triggers, signposts, NPCs | working, all 384 maps |
 | Overworld: rendering, grid movement, warps | working |
 | Collision | provisional — see below |
+| Overworld sprites: player and NPCs | working, 102 sprites |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
-| Overworld sprites (player, NPCs) | not started — placeholders drawn |
 | Map scripts | pointers extracted, bytecode not decoded |
 | Text banks | not started |
 | Battles, menus, audio | not started |
@@ -37,10 +37,10 @@ engine does not exist yet.
 | Engine (overworld, battle, menus) | not started |
 
 You can walk around. Import a cartridge, press enter, and move with the arrow
-keys or WASD; doors warp between maps. The player and NPCs are placeholder
-rectangles until overworld sprites are extracted.
+keys or WASD; doors warp between maps, and the player and NPCs are drawn with
+the cartridge's own sprites.
 
-103 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+109 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
@@ -58,6 +58,8 @@ itself and does not depend on them:
 | Sprite palettes | `0x00A8D6` | `$02` |
 | Tileset headers | `0x04D596` | `$13` |
 | Map headers | `0x094034` | `$25` |
+| Map group pointers | `0x094000` | `$25` |
+| Overworld sprite table | `0x014736` | `$05` |
 
 ## Requirements
 

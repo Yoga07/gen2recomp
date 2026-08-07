@@ -52,10 +52,71 @@ function world.load(game)
     game = game,
     maps = maps,
     tilesets = tilesets,
+    -- Overworld sprites are optional: without them the engine draws
+    -- placeholders rather than refusing to run.
+    ow_sprites = cache.read(game, "ow_sprites") or {},
     images = {},   -- tileset index -> Image
     quads = {},    -- tileset index -> array of Quads, one per tile
     batches = {},  -- tileset index -> SpriteBatch
+    ow_images = {},
+    ow_quads = {},
   }, world)
+end
+
+-- Frame order within a standard overworld sprite. Left is the side view
+-- mirrored, which is how the original saved a frame.
+local FACING_FRAME = { down = 0, up = 1, right = 2, left = 2 }
+
+--- Load an overworld sprite sheet and its per-frame quads.
+-- @return image, quads or nil when that sprite id has no graphics
+function world:ow_sprite(id)
+  if self.ow_images[id] == nil then
+    local record = self.ow_sprites[id]
+    local path = ("%s/ow/%03d.png"):format(cache.dir(self.game), id)
+    if not record or not love.filesystem.getInfo(path) then
+      self.ow_images[id] = false
+    else
+      local image = love.graphics.newImage(path)
+      image:setFilter("nearest", "nearest")
+
+      local quads = {}
+      for frame = 0, record.frames - 1 do
+        quads[frame] = love.graphics.newQuad(frame * 16, 0, 16, 16,
+          image:getDimensions())
+      end
+      self.ow_images[id] = image
+      self.ow_quads[id] = quads
+    end
+  end
+
+  if not self.ow_images[id] then
+    return nil
+  end
+  return self.ow_images[id], self.ow_quads[id]
+end
+
+--- Draw an overworld sprite at a pixel position, facing a direction.
+-- @return true when it drew, false when the caller should fall back
+function world:draw_ow_sprite(id, x, y, facing)
+  local image, quads = self:ow_sprite(id)
+  if not image then
+    return false
+  end
+
+  local frame = FACING_FRAME[facing or "down"] or 0
+  local quad = quads[frame] or quads[0]
+  if not quad then
+    return false
+  end
+
+  -- Sprites are 16 wide but stand on a 16-pixel cell, so they need no
+  -- horizontal offset; the mirror for facing left flips about the centre.
+  if facing == "left" then
+    love.graphics.draw(image, quad, x + 16, y, 0, -1, 1)
+  else
+    love.graphics.draw(image, quad, x, y)
+  end
+  return true
 end
 
 --- Lazily load a tileset's tilesheet and build one quad per tile.

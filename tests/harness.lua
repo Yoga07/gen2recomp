@@ -21,6 +21,7 @@ local palettes = require("src.rom.palettes")
 local tilesets = require("src.rom.tilesets")
 local maps = require("src.rom.maps")
 local events = require("src.rom.events")
+local ow_sprites = require("src.rom.ow_sprites")
 
 local harness = {}
 
@@ -696,6 +697,78 @@ local function test_events(rom, map_result)
     ("%d of %d"):format(with_script, object_total))
 end
 
+--- Overworld sprites: the player and NPCs. Checked structurally and then
+-- against how many of the game's NPCs can actually be drawn.
+local function test_ow_sprites(rom, map_result)
+  log("\n== overworld sprites ==")
+
+  local result, why = ow_sprites.locate(rom)
+  if not check("located the overworld sprite table", result ~= nil, why) then
+    return
+  end
+
+  log("        table at 0x%06X (bank $%02X), %d entries",
+    result.offset, math.floor(result.offset / 0x4000), #result.entries)
+
+  check("the table holds at least 100 sprites", #result.entries >= 100,
+    ("found %d"):format(#result.entries))
+
+  local bad_bank, bad_frames, bad_decode = 0, 0, 0
+  local kinds, frame_counts = {}, {}
+
+  for _, entry in ipairs(result.entries) do
+    if not ow_sprites.BANKS[entry.bank] then
+      bad_bank = bad_bank + 1
+    end
+    if entry.tiles % ow_sprites.TILES_PER_FRAME ~= 0 or entry.frames < 1 then
+      bad_frames = bad_frames + 1
+    end
+    if not ow_sprites.decode(rom, entry) then
+      bad_decode = bad_decode + 1
+    end
+    kinds[entry.kind] = (kinds[entry.kind] or 0) + 1
+    frame_counts[entry.frames] = (frame_counts[entry.frames] or 0) + 1
+  end
+
+  check_equal("every sprite lives in a graphics bank", bad_bank, 0)
+  check_equal("every sprite is a whole number of frames", bad_frames, 0)
+  check_equal("every sprite's tiles decode", bad_decode, 0)
+
+  local shapes = {}
+  for frames, count in pairs(frame_counts) do
+    shapes[#shapes + 1] = ("%d frames x%d"):format(frames, count)
+  end
+  table.sort(shapes)
+  log("        %s", table.concat(shapes, ", "))
+
+  local kind_list = {}
+  for kind, count in pairs(kinds) do
+    kind_list[#kind_list + 1] = ("type %d x%d"):format(kind, count)
+  end
+  table.sort(kind_list)
+  log("        %s", table.concat(kind_list, ", "))
+
+  -- The point of all this: can the game's NPCs actually be drawn?
+  if map_result then
+    local drawable, total = 0, 0
+    for _, header in ipairs(map_result.headers) do
+      local decoded = not header.unparsed and events.decode(rom, header)
+      if decoded then
+        for _, object in ipairs(decoded.objects) do
+          total = total + 1
+          if result.entries[object.sprite] then
+            drawable = drawable + 1
+          end
+        end
+      end
+    end
+    check("most NPCs have a sprite in the table",
+      drawable > total * 0.75,
+      ("%d of %d NPCs drawable"):format(drawable, total))
+    log("        %d of %d NPC instances resolve to a sprite", drawable, total)
+  end
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -844,6 +917,7 @@ function harness.run(rom_path, report_path)
     local tileset_result = test_tilesets(rom)
     local map_result = test_maps(rom, tileset_result)
     test_events(rom, map_result)
+    test_ow_sprites(rom, map_result)
     rom:release()
     test_engine()
   end

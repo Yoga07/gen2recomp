@@ -202,6 +202,41 @@ Verification is visual and unambiguous. Rendering a map with warps, signposts
 and NPCs overlaid puts every warp on a door, every signpost on a sign tile, and
 every NPC on walkable ground. Coordinates read from a wrong offset scatter.
 
+## Finding uncompressed graphics
+
+Overworld sprites resisted every technique that had worked so far. There is no
+LZ block to index, so the trick that found the Pokémon pics does not apply, and
+the graphics are not laid out in table order, so entries cannot be chained by
+size either — that was tried under both two- and three-byte pointers and found
+nothing. Constraining on field shape found no run remotely long enough for the
+118 distinct sprite ids the game's NPCs use.
+
+What worked was finding the data first, and the useful idea was how to
+recognise it. The obvious test for "looks like art" — uses most of the palette,
+no single colour dominant — is actively misleading, because **compressed data is
+near-random and satisfies it perfectly**. Ranking banks that way just returns
+the Pokémon pic banks at 100%.
+
+Spatial coherence separates them. Neighbouring pixels in a drawing are usually
+the same colour; in random bytes they agree about a quarter of the time.
+Counting horizontal agreement across every tile in every bank put the overworld
+sprites in the `$30`s and the font in `$3E`, which reduced the table search to
+"where is there a long run of pointers into those banks".
+
+### The size field is not the size
+
+An entry is six bytes: address, VRAM allocation, bank, type, palette. Byte 2
+reads `$C0` for almost every entry, which looks exactly like a length — twelve
+tiles — and is not one. It is how much the game copies into VRAM, while the
+graphic in ROM is twelve tiles for a standing sprite and twenty-four for a
+walking one. Reading it as a ROM length finds seven entries and rejects the
+rest.
+
+The real extent comes from the gap to the next entry's address, the same way a
+tileset's block count comes from the gap between its block and collision
+pointers. Assuming `$C0` universally stops the table at 68 of 102 entries: still
+sprites, such as an item lying on the ground, allocate `$40`.
+
 ## Collision is provisional
 
 `world.WALL_COLLISION = $07` and everything else is walkable. That is not right,

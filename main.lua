@@ -18,6 +18,7 @@ local HEADLESS = {
   ["--probe-maps"] = "tests.probe_maps",
   ["--probe-events"] = "tests.probe_events",
   ["--probe-collision"] = "tests.probe_collision",
+  ["--probe-ow-sprites"] = "tests.probe_ow_sprites",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }

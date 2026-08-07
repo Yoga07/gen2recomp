@@ -14,6 +14,7 @@ local palettes = require("src.rom.palettes")
 local tilesets = require("src.rom.tilesets")
 local maps = require("src.rom.maps")
 local events = require("src.rom.events")
+local ow_sprites = require("src.rom.ow_sprites")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -193,6 +194,39 @@ function importer.run(path, progress)
     cache.write(descriptor.game, "tilesets", records)
   end
 
+  -- Overworld sprites: the player and the NPCs.
+  step("locating overworld sprites")
+  local ow_summary = { count = 0, images = 0 }
+  local ow_result, ow_err = ow_sprites.locate(rom)
+
+  if not ow_result then
+    failed.ow_sprites = ow_err
+  else
+    offsets.ow_sprites = ow_result.offset
+    ow_summary.count = #ow_result.entries
+    cache.ensure(descriptor.game .. "/ow")
+
+    local records = {}
+    for index, entry in ipairs(ow_result.entries) do
+      records[index] = {
+        graphics = entry.graphics,
+        tiles = entry.tiles,
+        frames = entry.frames,
+        kind = entry.kind,
+        palette = entry.palette,
+      }
+      local tiles = ow_sprites.decode(rom, entry)
+      if tiles then
+        local image = ow_sprites.to_image_data(tiles, entry.frames)
+        if cache.write_image(descriptor.game, ("ow/%03d"):format(index), image) then
+          ow_summary.images = ow_summary.images + 1
+        end
+      end
+    end
+    cache.write(descriptor.game, "ow_sprites", records)
+    step(("wrote %d overworld sprites"):format(ow_summary.images))
+  end
+
   -- Maps. Block data is cached rather than rendered: the engine draws from the
   -- grid at runtime, and rendering 384 maps up front would cost minutes and
   -- produce images nothing reads. `--dump-maps` renders them when a human needs
@@ -307,6 +341,7 @@ function importer.run(path, progress)
     sprites = sprites,
     tilesets = tileset_summary,
     maps = map_summary,
+    ow_sprites = ow_summary,
     sha1 = sha1,
   }
 end
@@ -336,6 +371,11 @@ function importer.format_report(report)
   if report.sprites then
     lines[#lines + 1] = ("  %-16s %4d sprites written, %d failed")
       :format("sprites", report.sprites.written, report.sprites.failed)
+  end
+
+  if report.ow_sprites then
+    lines[#lines + 1] = ("  %-16s %4d sprites, %d images")
+      :format("overworld", report.ow_sprites.count, report.ow_sprites.images)
   end
 
   if report.tilesets then

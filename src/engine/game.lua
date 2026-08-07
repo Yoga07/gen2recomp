@@ -193,27 +193,35 @@ function game:draw(scale)
       world.CELL_PIXELS - 1, world.CELL_PIXELS - 1)
   end
 
-  -- NPCs, likewise a placeholder until overworld sprites are extracted.
-  love.graphics.setColor(0.4, 0.6, 1, 0.75)
+  -- NPCs. Sprites stand a little taller than their cell, so they are drawn
+  -- shifted up by half a tile the way the original did.
+  love.graphics.setColor(1, 1, 1)
   for _, object in ipairs(map.objects or {}) do
-    love.graphics.rectangle("fill",
-      object.x * world.CELL_PIXELS - camera_x + 3,
-      object.y * world.CELL_PIXELS - camera_y + 3,
-      world.CELL_PIXELS - 6, world.CELL_PIXELS - 6)
+    local ox = object.x * world.CELL_PIXELS - camera_x
+    local oy = object.y * world.CELL_PIXELS - camera_y - 4
+    if not self.world:draw_ow_sprite(object.sprite, ox, oy, "down") then
+      love.graphics.setColor(0.4, 0.6, 1, 0.75)
+      love.graphics.rectangle("fill", ox + 3, oy + 7,
+        world.CELL_PIXELS - 6, world.CELL_PIXELS - 6)
+      love.graphics.setColor(1, 1, 1)
+    end
   end
 
-  -- The player. A placeholder too, with a notch showing which way he faces.
+  -- The player. Sprite 1 is the player character.
   love.graphics.setColor(1, 1, 1)
-  love.graphics.rectangle("fill",
-    px - camera_x + 2, py - camera_y + 2,
-    world.CELL_PIXELS - 4, world.CELL_PIXELS - 4)
-  love.graphics.setColor(0.1, 0.1, 0.1)
-  local notch = {
-    up = { 6, 0 }, down = { 6, 10 }, left = { 0, 6 }, right = { 10, 6 },
-  }
-  local offset = notch[self.player.facing]
-  love.graphics.rectangle("fill",
-    px - camera_x + 3 + offset[1], py - camera_y + 3 + offset[2], 4, 4)
+  if not self.world:draw_ow_sprite(1, px - camera_x, py - camera_y - 4,
+    self.player.facing) then
+    love.graphics.rectangle("fill",
+      px - camera_x + 2, py - camera_y + 2,
+      world.CELL_PIXELS - 4, world.CELL_PIXELS - 4)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    local notch = {
+      up = { 6, 0 }, down = { 6, 10 }, left = { 0, 6 }, right = { 10, 6 },
+    }
+    local offset = notch[self.player.facing]
+    love.graphics.rectangle("fill",
+      px - camera_x + 3 + offset[1], py - camera_y + 3 + offset[2], 4, 4)
+  end
 
   love.graphics.setCanvas()
 
