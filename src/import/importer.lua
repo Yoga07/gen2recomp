@@ -179,11 +179,15 @@ function importer.run(path, progress)
           blocks = blocks,
           collision = tilesets.decode_collision(rom, header),
         }
-        local image = tilesets.blockset_image(tiles, blocks, 8)
-        if cache.write_image(descriptor.game,
-          ("tilesets/%02d_blocks"):format(index), image) then
+        -- The tilesheet is what the engine actually draws from; the blockset
+        -- is for humans checking the import by eye.
+        if cache.write_image(descriptor.game, ("tilesets/%02d_tiles"):format(index),
+          tilesets.tilesheet_image(tiles, 16)) then
           tileset_summary.images = tileset_summary.images + 1
         end
+        cache.write_image(descriptor.game, ("tilesets/%02d_blocks"):format(index),
+          tilesets.blockset_image(tiles, blocks, 8))
+        records[index].tilesheet_columns = 16
       end
     end
     cache.write(descriptor.game, "tilesets", records)
@@ -207,6 +211,13 @@ function importer.run(path, progress)
 
       local records = {}
       for index, header in ipairs(map_result.headers) do
+        -- Placeholder slots keep the numbering aligned so warps, which address
+        -- maps by position within a group, still land where they should.
+        if header.unparsed then
+          records[index] = { unparsed = true, header_offset = header.offset }
+          goto continue
+        end
+
         local attributes = header.attributes
         map_summary.blocks = map_summary.blocks + attributes.width * attributes.height
 
@@ -244,6 +255,19 @@ function importer.run(path, progress)
         end
 
         records[index] = record
+        ::continue::
+      end
+
+      -- Warps name their destination by (group, number), so the group table is
+      -- what makes them followable.
+      local groups, group_err = maps.locate_groups(rom, map_result.headers)
+      if groups then
+        offsets.map_groups = groups.offset
+        cache.write(descriptor.game, "map_groups",
+          maps.group_index(map_result.headers, groups.groups))
+        map_summary.groups = #groups.groups
+      else
+        failed.map_groups = group_err
       end
 
       cache.write(descriptor.game, "maps", records)

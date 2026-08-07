@@ -527,6 +527,9 @@ local function test_maps(rom, tileset_result)
   local total_blocks = 0
 
   for _, header in ipairs(result.headers) do
+    -- Placeholder slots exist to hold map numbering in place; they carry no
+    -- attributes to check.
+    if not header.unparsed then
     local attributes = header.attributes
 
     if attributes.width < 1 or attributes.width > maps.MAX_DIMENSION
@@ -558,7 +561,11 @@ local function test_maps(rom, tileset_result)
         block_id_violations = block_id_violations + 1
       end
     end
+    end
   end
+
+  log("        %d placeholder slots hold numbering for headers that do not decode",
+    result.placeholders or 0)
 
   check_equal("every map has usable dimensions", bad_dimensions, 0)
   check_equal("every environment id is known", bad_environment, 0)
@@ -575,7 +582,13 @@ local function test_maps(rom, tileset_result)
     ("%d of %d have connections"):format(with_connections, #result.headers))
 
   -- Block data must be readable as a grid of the stated size.
-  local sample = result.headers[1]
+  local sample
+  for _, header in ipairs(result.headers) do
+    if not header.unparsed then
+      sample = header
+      break
+    end
+  end
   local grid = maps.decode_block_data(rom, sample)
   check_equal("block data has one row per map row", #grid, sample.attributes.height)
   check_equal("block data has one column per map column", #grid[1],
@@ -599,9 +612,17 @@ local function test_events(rom, map_result)
   local bad_destinations, bad_scripts, unknown_bg = 0, 0, 0
   local outside = 0
 
+  local parsed_maps = 0
   for _, header in ipairs(map_result.headers) do
-    local decoded, why = events.decode(rom, header)
-    if not decoded then
+    local decoded, why
+    if not header.unparsed then
+      parsed_maps = parsed_maps + 1
+      decoded, why = events.decode(rom, header)
+    end
+
+    if header.unparsed then -- luacheck: ignore
+      -- No attributes, so no event header to reach.
+    elseif not decoded then
       if #failures < 5 then
         failures[#failures + 1] = ("0x%06X: %s"):format(header.offset, tostring(why))
       end
@@ -635,7 +656,7 @@ local function test_events(rom, map_result)
     end
   end
 
-  check_equal("every map's events decode", decoded_count, #map_result.headers)
+  check_equal("every decodable map's events decode", decoded_count, parsed_maps)
   for _, failure in ipairs(failures) do
     log("        %s", failure)
   end
@@ -661,7 +682,7 @@ local function test_events(rom, map_result)
   -- Objects carry scripts too, though some are null.
   local with_script, object_total = 0, 0
   for _, header in ipairs(map_result.headers) do
-    local decoded = events.decode(rom, header)
+    local decoded = not header.unparsed and events.decode(rom, header)
     if decoded then
       for _, object in ipairs(decoded.objects) do
         object_total = object_total + 1
@@ -673,6 +694,129 @@ local function test_events(rom, map_result)
   end
   check("most objects carry a script pointer", with_script > object_total * 0.9,
     ("%d of %d"):format(with_script, object_total))
+end
+
+--- The engine reads only the cache, never a cartridge, so these tests check the
+-- cached data is shaped the way a game needs rather than the way a viewer does.
+-- Skipped when nothing has been imported yet.
+local function test_engine()
+  log("\n== engine ==")
+
+  local cache = require("src.import.cache")
+  local world = require("src.engine.world")
+
+  local games = cache.list_games()
+  local game_id
+  for _, entry in ipairs(games) do
+    if entry.current then
+      game_id = entry.game
+      break
+    end
+  end
+
+  if not game_id then
+    log("  SKIP  no import in the cache")
+    return
+  end
+
+  local loaded, why = world.load(game_id)
+  if not check("world loads from the cache", loaded ~= nil, why) then
+    return
+  end
+
+  log("        %d maps, %d tilesets", loaded:map_count(), #loaded.tilesets)
+
+  -- Every map must name a tileset that was actually cached, or it cannot be
+  -- drawn at all.
+  local missing_tileset, playable = 0, 0
+  for index = 1, loaded:map_count() do
+    local map = loaded:map(index)
+    if not map.unparsed then
+      playable = playable + 1
+      if not loaded.tilesets[map.tileset] then
+        missing_tileset = missing_tileset + 1
+      end
+    end
+  end
+  check_equal("every map's tileset is cached", missing_tileset, 0)
+  log("        %d playable, %d placeholder slots", playable,
+    loaded:map_count() - playable)
+
+  -- Collision must resolve for every cell of every map; a nil means block or
+  -- tileset data is short.
+  local unresolved, walkable_cells, total_cells = 0, 0, 0
+  for index = 1, loaded:map_count() do
+    local map = loaded:map(index)
+    if not map.unparsed then
+    for cell_y = 0, map.height * world.CELLS_PER_BLOCK - 1 do
+      for cell_x = 0, map.width * world.CELLS_PER_BLOCK - 1 do
+        total_cells = total_cells + 1
+        if not loaded:collision_at(map, cell_x, cell_y) then
+          unresolved = unresolved + 1
+        elseif loaded:walkable(map, cell_x, cell_y) then
+          walkable_cells = walkable_cells + 1
+        end
+      end
+    end
+    end
+  end
+  check_equal("collision resolves for every cell", unresolved, 0)
+  log("        %d of %d cells walkable (%d%%)", walkable_cells, total_cells,
+    math.floor(walkable_cells / total_cells * 100))
+
+  -- Off-map is blocked.
+  local first
+  for index = 1, loaded:map_count() do
+    if not loaded:map(index).unparsed then
+      first = loaded:map(index)
+      break
+    end
+  end
+  check("stepping off the map edge is blocked",
+    not loaded:walkable(first, -1, 0) and not loaded:walkable(first, 0, -1))
+
+  -- The warp graph. Every warp names a destination by group and number, and
+  -- every one of those must resolve to a real map through the group table.
+  -- This exercises the group table, the map ordering and the warp decoder at
+  -- once, across the whole game.
+  local groups = cache.read(game_id, "map_groups")
+  if check("map group table is cached", groups ~= nil) then
+    check_equal("Crystal has 26 map groups", #groups, 26)
+
+    local total_warps, unresolved_warps = 0, 0
+    local zero_index, missing_arrival = 0, 0
+    for index = 1, loaded:map_count() do
+      for _, warp in ipairs(loaded:map(index).warps or {}) do
+        total_warps = total_warps + 1
+        local start = groups[warp.destination_group]
+        local destination = start and loaded:map(start + warp.destination_map - 1)
+        if not destination or destination.unparsed then
+          unresolved_warps = unresolved_warps + 1
+        elseif warp.destination_warp == 0 then
+          -- Index 0 is not a warp on the destination. Gen 2 uses it for warps
+          -- whose arrival point is decided by a script rather than by geometry.
+          zero_index = zero_index + 1
+        elseif not (destination.warps or {})[warp.destination_warp] then
+          missing_arrival = missing_arrival + 1
+        end
+      end
+    end
+
+    -- Not asserted as zero, because it is not zero and pretending otherwise
+    -- would hide a regression rather than prevent one. Eight warps lead into
+    -- the four headers that do not decode; six name an arrival index their
+    -- destination lacks, which is unexplained. Both are well under a percent,
+    -- and the thresholds are tight enough that any real breakage trips them.
+    check("virtually every warp resolves to a decodable map",
+      unresolved_warps <= total_warps * 0.01,
+      ("%d of %d unresolved"):format(unresolved_warps, total_warps))
+    check("virtually every warp finds its arrival point",
+      missing_arrival <= total_warps * 0.01,
+      ("%d of %d missing"):format(missing_arrival, total_warps))
+
+    log("        %d warps: %d unresolved, %d missing arrival, %d use index 0",
+      total_warps, unresolved_warps, missing_arrival, zero_index)
+  end
 end
 
 --------------------------------------------------------------------------------
@@ -701,6 +845,7 @@ function harness.run(rom_path, report_path)
     local map_result = test_maps(rom, tileset_result)
     test_events(rom, map_result)
     rom:release()
+    test_engine()
   end
 
   log("\n== summary ==")

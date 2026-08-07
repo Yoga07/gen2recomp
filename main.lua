@@ -1,20 +1,35 @@
 -- gen2recomp entry point.
 --
--- At this stage the application is the importer and a viewer for what it
--- extracted. The engine will be layered on top once the data pipeline is
--- trustworthy; being able to read the decoded tables back is what makes that
--- judgement possible.
+-- With a cache present this boots the overworld. Without one it shows the
+-- importer, which is also where you land after pressing escape.
 
 local importer = require("src.import.importer")
 local cache = require("src.import.cache")
+local game_module = require("src.engine.game")
+
+-- Headless entry points, since drag-and-drop cannot be scripted. Each module
+-- exposes run(rom_path, report_path, extra).
+local HEADLESS = {
+  ["--test"] = "tests.harness",
+  ["--import"] = "tests.run_import",
+  ["--probe-pics"] = "tests.probe_pics",
+  ["--probe-palettes"] = "tests.probe_palettes",
+  ["--probe-tilesets"] = "tests.probe_tilesets",
+  ["--probe-maps"] = "tests.probe_maps",
+  ["--probe-events"] = "tests.probe_events",
+  ["--probe-collision"] = "tests.probe_collision",
+  ["--dump-tilesets"] = "tests.dump_tilesets",
+  ["--dump-maps"] = "tests.dump_maps",
+}
 
 local state = {
-  screen = "idle", -- idle | importing | report | error
+  screen = "idle", -- idle | importing | report | error | playing
   lines = {},
   scroll = 0,
-  progress = {},
-  message = nil,
   pending_path = nil,
+  game = nil,
+  scale = 3,
+  shot = nil,
 }
 
 local font
@@ -27,56 +42,63 @@ local function set_lines(str)
   state.scroll = 0
 end
 
-local function describe_existing_caches()
+local function first_cached_game()
   local games = cache.list_games()
-  if #games == 0 then
-    return nil
-  end
-  local lines = { "already imported:" }
   for _, entry in ipairs(games) do
-    lines[#lines + 1] = ("  %s  %s%s"):format(
-      entry.manifest.name or entry.game,
-      entry.manifest.sha1 and entry.manifest.sha1:sub(1, 12) or "?",
-      entry.current and "" or "  (stale cache format, re-import needed)"
-    )
+    if entry.current then
+      return entry.game
+    end
   end
-  lines[#lines + 1] = ""
-  lines[#lines + 1] = ("cache location: %s"):format(cache.location())
-  return table.concat(lines, "\n")
+  return nil
+end
+
+local function start_game(game_id, map_index)
+  local instance, why = game_module.new(game_id, map_index)
+  if not instance then
+    state.screen = "error"
+    set_lines(("could not start the game\n\n%s\n\npress escape to go back")
+      :format(tostring(why)))
+    return false
+  end
+  state.game = instance
+  state.screen = "playing"
+  return true
 end
 
 local function show_idle()
   state.screen = "idle"
-  local existing = describe_existing_caches()
-  set_lines(table.concat({
-    "gen2recomp",
-    "",
-    "Drag a Pokemon Gold, Silver, or Crystal cartridge image onto this",
-    "window to import it.",
-    "",
-    "The image is verified, read once, and released. It is not copied",
-    "into the cache and it is not written anywhere on disk.",
-    "",
-    existing or "nothing imported yet.",
-  }, "\n"))
+  state.game = nil
+
+  local games = cache.list_games()
+  local lines = { "gen2recomp", "" }
+
+  if #games == 0 then
+    lines[#lines + 1] = "Drag a Pokemon Gold, Silver, or Crystal cartridge image"
+    lines[#lines + 1] = "onto this window to import it."
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "The image is verified, read once, and released. It is not"
+    lines[#lines + 1] = "copied into the cache and it is not written anywhere on disk."
+  else
+    lines[#lines + 1] = "imported:"
+    for _, entry in ipairs(games) do
+      lines[#lines + 1] = ("  %s%s"):format(entry.manifest.name or entry.game,
+        entry.current and "" or "  (stale cache, re-import needed)")
+    end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "press enter to walk around"
+    lines[#lines + 1] = "drag another cartridge onto the window to re-import"
+  end
+
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = ("cache: %s"):format(cache.location())
+  set_lines(table.concat(lines, "\n"))
 end
 
 function love.load(args)
-  -- Headless mode: `love . --test <rom> <report>` runs the decoder tests and
-  -- exits. LOVE has no usable stdout on Windows, so the report is a file.
-  local headless = {
-    ["--test"] = "tests.harness",
-    ["--import"] = "tests.run_import",
-    ["--probe-pics"] = "tests.probe_pics",
-    ["--probe-palettes"] = "tests.probe_palettes",
-    ["--probe-tilesets"] = "tests.probe_tilesets",
-    ["--dump-tilesets"] = "tests.dump_tilesets",
-    ["--probe-maps"] = "tests.probe_maps",
-    ["--dump-maps"] = "tests.dump_maps",
-    ["--probe-events"] = "tests.probe_events",
-  }
-  for i, value in ipairs(args or {}) do
-    local module = headless[value]
+  args = args or {}
+
+  for i, value in ipairs(args) do
+    local module = HEADLESS[value]
     if module then
       local rom_path, report_path = args[i + 1], args[i + 2]
       -- A crash here would otherwise be swallowed by LOVE's error screen, which
@@ -94,25 +116,43 @@ function love.load(args)
       love.event.quit((ok and result) and 0 or 1)
       return
     end
+
+    -- Render one frame of the overworld to a PNG and exit, so the engine can be
+    -- checked without a human at the keyboard.
+    if value == "--shot" then
+      state.shot = {
+        path = args[i + 1],
+        map_index = tonumber(args[i + 2]),
+        frames = 2,
+      }
+    end
   end
 
   love.window.setTitle("gen2recomp")
-  love.keyboard.setKeyRepeat(true)
-  font = love.graphics.newFont(14)
+  love.keyboard.setKeyRepeat(false)
+  font = love.graphics.newFont(13)
   love.graphics.setFont(font)
-  show_idle()
+  love.graphics.setDefaultFilter("nearest", "nearest")
+
+  local game_id = first_cached_game()
+  if game_id then
+    if not start_game(game_id, state.shot and state.shot.map_index) then
+      return
+    end
+  else
+    show_idle()
+    if state.shot then
+      love.event.quit(1)
+    end
+  end
 end
 
 function love.filedropped(file)
   state.pending_path = file:getFilename()
   state.screen = "importing"
-  state.progress = { "starting import" }
   set_lines("importing...")
 end
 
---- The import runs on the frame after the drop so the "importing" screen is
--- actually painted first; it is fast enough that threading it would add more
--- complexity than it removes.
 local function run_pending_import()
   local path = state.pending_path
   state.pending_path = nil
@@ -125,59 +165,88 @@ local function run_pending_import()
   if not report then
     state.screen = "error"
     set_lines(table.concat({
-      "import failed",
-      "",
-      err,
-      "",
-      "log:",
-      "  " .. table.concat(log, "\n  "),
-      "",
-      "press escape to go back",
+      "import failed", "", err, "", "log:",
+      "  " .. table.concat(log, "\n  "), "", "press escape to go back",
     }, "\n"))
     return
   end
 
   state.screen = "report"
   set_lines(table.concat({
-    importer.format_report(report),
-    "",
-    ("cache written to %s"):format(cache.location()),
-    "",
-    "press escape to go back",
+    importer.format_report(report), "",
+    ("cache written to %s"):format(cache.location()), "",
+    "press enter to walk around, escape to go back",
   }, "\n"))
 end
 
-function love.update()
+function love.update(dt)
   if state.screen == "importing" and state.pending_path then
     run_pending_import()
+  elseif state.screen == "playing" then
+    state.game:update(dt)
   end
 end
 
 function love.keypressed(key)
+  if state.screen == "playing" then
+    if key == "escape" then
+      show_idle()
+    elseif key == "f11" then
+      love.window.setFullscreen(not love.window.getFullscreen())
+    elseif key == "=" or key == "+" then
+      state.scale = math.min(8, state.scale + 1)
+    elseif key == "-" then
+      state.scale = math.max(1, state.scale - 1)
+    end
+    return
+  end
+
   if key == "escape" then
     if state.screen == "idle" then
       love.event.quit()
     else
       show_idle()
     end
+  elseif key == "return" then
+    local game_id = first_cached_game()
+    if game_id then
+      start_game(game_id)
+    end
   elseif key == "up" then
     state.scroll = math.max(0, state.scroll - 1)
   elseif key == "down" then
     state.scroll = math.min(math.max(0, #state.lines - 1), state.scroll + 1)
-  elseif key == "pageup" then
-    state.scroll = math.max(0, state.scroll - 20)
-  elseif key == "pagedown" then
-    state.scroll = math.min(math.max(0, #state.lines - 1), state.scroll + 20)
   end
 end
 
 function love.wheelmoved(_, dy)
-  state.scroll = math.max(0, math.min(math.max(0, #state.lines - 1), state.scroll - dy * 3))
+  if state.screen ~= "playing" then
+    state.scroll = math.max(0, math.min(math.max(0, #state.lines - 1),
+      state.scroll - dy * 3))
+  end
 end
 
 function love.draw()
-  love.graphics.clear(0.06, 0.07, 0.09)
+  if state.screen == "playing" then
+    love.graphics.clear(0.02, 0.02, 0.03)
+    state.game:draw(state.scale)
 
+    if state.shot then
+      state.shot.frames = state.shot.frames - 1
+      if state.shot.frames <= 0 then
+        local data = state.game.canvas:newImageData()
+        local fh = io.open(state.shot.path, "wb")
+        if fh then
+          fh:write(data:encode("png"):getString())
+          fh:close()
+        end
+        love.event.quit(0)
+      end
+    end
+    return
+  end
+
+  love.graphics.clear(0.06, 0.07, 0.09)
   local line_height = font:getHeight() + 4
   local visible = math.floor((love.graphics.getHeight() - 32) / line_height)
 
@@ -189,15 +258,5 @@ function love.draw()
     end
     love.graphics.print(line, 16, 16 + (i - 1) * line_height)
   end
-
-  if #state.lines > visible then
-    love.graphics.setColor(0.4, 0.42, 0.46)
-    love.graphics.print(
-      ("%d/%d"):format(state.scroll + 1, #state.lines),
-      love.graphics.getWidth() - 80,
-      love.graphics.getHeight() - 24
-    )
-  end
-
   love.graphics.setColor(1, 1, 1)
 end

@@ -140,11 +140,35 @@ blocks, no violations. Map headers and tileset headers are found by separate
 searches in different banks, so that agreement is not something a wrong offset
 produces.
 
-Two caveats worth keeping visible. The headers come back as two runs with a
-36-byte gap, which is four records the validator rejects — real maps whose
-fields fall outside the accepted ranges, not absent ones. And 384 has not been
-checked against an authoritative map count for Crystal, so treat it as "the maps
-that decode" rather than "all the maps".
+### Validation finds the region; enumeration fills it
+
+These must be separate steps, and conflating them was a real bug rather than an
+untidiness.
+
+Headers are addressed *by position*: a warp names its destination as a map group
+plus an index counted from that group's first header. Four of Crystal's headers
+fail the validator, appearing as a 36-byte gap between two runs. The first
+version of this code simply omitted them — which shifted every later map down by
+four and silently rewired the warp graph. It looked fine: the maps all rendered,
+the block ids all checked out, and 75 warps quietly pointed at the wrong
+buildings.
+
+What caught it was walking the whole warp graph and asking whether each
+destination actually contains the arrival warp it names. Fixing the enumeration
+took the failures from 75 to 6.
+
+So the runs are now used only to find where the table begins and ends, and every
+nine-byte slot in that span becomes an entry. Slots that do not decode are kept
+as placeholders with `attributes = nil`. 388 slots, 384 usable.
+
+The general lesson: when data is addressed by position, dropping an
+unparseable entry is far more damaging than keeping a broken one, because it
+corrupts everything after it instead of just itself.
+
+Two figures stay honest rather than asserted to zero. Eight warps lead into the
+four undecodable headers. Six name an arrival index their destination lacks, and
+that one is unexplained. Both are under half a percent, and the tests bound them
+tightly enough that a regression trips.
 
 ## Event headers, and what a bounds check is actually for
 
@@ -177,6 +201,41 @@ a format is not automatically a good invariant to enforce afterwards.
 Verification is visual and unambiguous. Rendering a map with warps, signposts
 and NPCs overlaid puts every warp on a door, every signpost on a sign tile, and
 every NPC on walkable ground. Coordinates read from a wrong offset scatter.
+
+## Collision is provisional
+
+`world.WALL_COLLISION = $07` and everything else is walkable. That is not right,
+and the code says so.
+
+The evidence for `$07` is strong and visual: tinting it across whole maps lands
+it exactly on buildings, cliff faces and ledges. The evidence against treating
+everything else as passable is equally clear — doors, water and rock faces are
+distinct values that are not all walkable, and the current rule reports 58% of
+all cells walkable, which is too generous.
+
+Two attempts to derive the meaning of the remaining values did not settle it.
+Surveying which values sit under the game's 1,300 warps and 1,466 NPCs — places
+the player provably stands — returns thirty distinct values, and 466 NPCs
+apparently stand on `$07` itself, which contradicts it being a wall. Testing
+both quadrant orderings changed nothing (52% versus 50%), so the lookup is not
+misindexed.
+
+That contradiction is unresolved. It is good enough to walk around with and it
+is not correct, which is why it is one constant with a comment rather than a
+table pretending to authority.
+
+## The engine reads only the cache
+
+`src/engine/` never sees a cartridge. It loads what the importer wrote and
+nothing else, which is what keeps a decoder bug showing up as a failed import
+rather than as a subtly wrong game months later.
+
+Three coordinate systems meet in the overworld and mixing them up is the easiest
+mistake available: blocks are 32x32 pixels and index the map data, cells are
+16x16 and are what the player walks on at two per block edge, and collision is
+stored per cell as four bytes per block. Rendering goes to a 160x144 canvas —
+the hardware's resolution — scaled by whole numbers only, because fractional
+scaling makes tile edges visibly uneven on this art.
 
 ## What is not decided yet
 

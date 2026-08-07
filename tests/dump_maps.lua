@@ -100,7 +100,9 @@ function dump.run(rom_path, report_path)
 
   local ranked = {}
   for _, header in ipairs(result.headers) do
-    ranked[#ranked + 1] = header
+    if not header.unparsed then
+      ranked[#ranked + 1] = header
+    end
   end
   table.sort(ranked, function(a, b)
     return a.attributes.width * a.attributes.height
@@ -152,6 +154,47 @@ function dump.run(rom_path, report_path)
       if love.filesystem.write(path, encoded:getString()) then
         written = written + 1
       end
+
+      -- A second render tinting every cell whose collision value is not one of
+      -- the two dominant ones. If those two really are floor, the tint should
+      -- fall on buildings, trees, cliffs and water and leave paths clear.
+      local collision = tilesets.decode_collision(rom, tileset_result.headers[header.tileset])
+      local grid = maps.decode_block_data(rom, header)
+      local overlay = maps.render(rom, header, tileset.tiles, tileset.blocks)
+
+      for ty = 0, attributes.height * 2 - 1 do
+        for tx = 0, attributes.width * 2 - 1 do
+          local block_id = grid[math.floor(ty / 2) + 1][math.floor(tx / 2) + 1]
+          local entry = collision[block_id + 1]
+          local value = entry and entry[(ty % 2) * 2 + (tx % 2) + 1]
+          -- Three-way tint so the two dominant values can be told apart:
+          -- $00 left clear, $07 blue, everything else red.
+          local tint
+          if value == 0x00 then
+            tint = nil
+          elseif value == 0x07 then
+            tint = { 0.3, 0.4, 1.0 }
+          elseif value then
+            tint = { 1.0, 0.3, 0.3 }
+          end
+
+          if tint then
+            for py = 0, TILE_PIXELS - 1 do
+              for px = 0, TILE_PIXELS - 1 do
+                local ox, oy = tx * TILE_PIXELS + px, ty * TILE_PIXELS + py
+                local r, g, b = overlay:getPixel(ox, oy)
+                overlay:setPixel(ox, oy,
+                  math.min(1, r * 0.45 + tint[1] * 0.55),
+                  math.min(1, g * 0.45 + tint[2] * 0.55),
+                  math.min(1, b * 0.45 + tint[3] * 0.55), 1)
+              end
+            end
+          end
+        end
+      end
+
+      local collision_path = ("dump/maps/%02d_collision.png"):format(i)
+      love.filesystem.write(collision_path, overlay:encode("png"):getString())
     end
   end
 

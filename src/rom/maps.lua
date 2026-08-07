@@ -153,15 +153,24 @@ end
 
 --- Locate the map headers.
 --
--- Headers sit contiguously within a map group, so they show up as runs. Groups
--- are not necessarily adjacent and a header that fails validation breaks a run,
--- so the result is the union of every run long enough to be real rather than
--- one continuous table.
+-- Validation finds the region; enumeration fills it. Those are deliberately
+-- separate steps, and conflating them is a correctness bug rather than a
+-- cosmetic one.
 --
--- @return { headers = {...}, runs = {...} } or nil plus a reason
+-- Headers sit contiguously and are addressed by position: a warp names its
+-- destination as a group plus an index counted from that group's first header.
+-- A handful of Crystal's headers fail the validator — four of them, in a
+-- 36-byte gap — and dropping those from the list shifts every later map down by
+-- four, silently rewiring the warp graph to the wrong destinations.
+--
+-- So the runs are used only to establish where the table starts and ends, and
+-- then every nine-byte slot in that span becomes an entry. Slots whose
+-- attributes do not decode are kept as placeholders with `attributes = nil`, so
+-- indices stay aligned and callers can see which maps are unusable.
+--
+-- @return { headers = {...}, runs = {...}, placeholders = n } or nil plus a reason
 function maps.locate(rom, tileset_count)
   local runs = {}
-  local headers = {}
 
   local offset = 0
   while offset <= rom.size - maps.HEADER_SIZE do
@@ -169,34 +178,130 @@ function maps.locate(rom, tileset_count)
       local start = offset
       local count = 0
       while offset <= rom.size - maps.HEADER_SIZE do
-        local header = maps.decode_header(rom, offset, tileset_count)
-        if not header then
+        if not maps.decode_header(rom, offset, tileset_count) then
           break
         end
         count = count + 1
         offset = offset + maps.HEADER_SIZE
       end
 
-      -- Four in a row is already far beyond chance given each one requires a
+      -- Four in a row is already far beyond chance, given each one requires a
       -- second record to validate as well.
       if count >= 4 then
         runs[#runs + 1] = { offset = start, count = count }
-        for i = 0, count - 1 do
-          headers[#headers + 1] =
-            maps.decode_header(rom, start + i * maps.HEADER_SIZE, tileset_count)
-        end
       end
     else
       offset = offset + 1
     end
   end
 
-  if #headers == 0 then
+  if #runs == 0 then
     return nil, "no runs of consecutive map headers found"
   end
 
-  table.sort(headers, function(a, b) return a.offset < b.offset end)
-  return { headers = headers, runs = runs }
+  table.sort(runs, function(a, b) return a.offset < b.offset end)
+
+  local region_start = runs[1].offset
+  local last = runs[#runs]
+  local region_end = last.offset + last.count * maps.HEADER_SIZE
+
+  local headers = {}
+  local placeholders = 0
+  for at = region_start, region_end - maps.HEADER_SIZE, maps.HEADER_SIZE do
+    local header = maps.decode_header(rom, at, tileset_count)
+    if not header then
+      placeholders = placeholders + 1
+      header = { offset = at, unparsed = true }
+    end
+    headers[#headers + 1] = header
+  end
+
+  return { headers = headers, runs = runs, placeholders = placeholders }
+end
+
+--- Locate the table that says where each map group's headers begin.
+--
+-- Warps name their destination as a (group, number) pair, so the flat list of
+-- headers is not enough to follow one. Groups are contiguous runs of headers,
+-- and this table holds one near pointer to the first header of each.
+--
+-- Found structurally: a run of 16-bit values that all resolve into the header
+-- region, land exactly on a 9-byte header boundary, and never go backwards.
+-- Random data does not satisfy all three for two dozen entries running.
+--
+-- @param headers sorted array from locate()
+-- @return { offset, groups = { flat_offset, ... } } or nil plus a reason
+function maps.locate_groups(rom, headers)
+  local first = headers[1].offset
+  local last = headers[#headers].offset
+  local bank = math.floor(first / 0x4000)
+
+  -- Which offsets are real header starts.
+  local is_header = {}
+  for _, header in ipairs(headers) do
+    is_header[header.offset] = true
+  end
+
+  local function target(offset)
+    local addr = rom:u16le(offset)
+    if addr < 0x4000 or addr > 0x7FFF then
+      return nil
+    end
+    local flat = bank * 0x4000 + (addr - 0x4000)
+    if flat < first or flat > last or not is_header[flat] then
+      return nil
+    end
+    return flat
+  end
+
+  local best = { count = 0 }
+  local offset = 0
+  while offset <= rom.size - 2 do
+    if target(offset) then
+      local start = offset
+      local list = {}
+      local previous = -1
+      while offset <= rom.size - 2 do
+        local flat = target(offset)
+        -- Group starts march forward through the header region.
+        if not flat or flat <= previous then
+          break
+        end
+        list[#list + 1] = flat
+        previous = flat
+        offset = offset + 2
+      end
+      if #list > best.count then
+        best = { count = #list, offset = start, groups = list }
+      end
+    else
+      offset = offset + 1
+    end
+  end
+
+  -- Crystal has 26 map groups; anything much shorter is not the table.
+  if best.count < 20 then
+    return nil, ("longest run of group pointers was %d, too short"):format(best.count)
+  end
+
+  return { offset = best.offset, groups = best.groups }
+end
+
+--- Build a (group, number) -> index lookup over the flat header list.
+function maps.group_index(headers, groups)
+  local position = {}
+  for index, header in ipairs(headers) do
+    position[header.offset] = index
+  end
+
+  local lookup = {}
+  for group, flat in ipairs(groups) do
+    local start = position[flat]
+    if start then
+      lookup[group] = start
+    end
+  end
+  return lookup
 end
 
 --- Read a map's block data as a row-major grid of block ids.
