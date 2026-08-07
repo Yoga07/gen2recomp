@@ -351,19 +351,29 @@ The lesson is about the ratio of constraint to freedom. Single-unknown inference
 works because one script pins one number. Two unknowns and one equation is
 underdetermined, and dressing it up as a search does not add information.
 
-### What this has and has not bought
+### The inference was mostly wrong, and its own metric could not tell
 
-The table is real and validated, and it gives a disassembler. It has not
-increased how much dialogue is readable, and it is worth being clear why: every
-opcode learned so far is a terminating one, so a walk stops at the first
-instruction and finds exactly the text that reading the first instruction
-already found. Coverage stays at 377.
+Checked against the real table afterwards, the inference got **13 of 24 widths
+wrong**. It reported zero overruns throughout.
 
-Getting past that needs the non-terminating opcodes, and those are precisely the
-ones single-unknown inference cannot reach. The way through is probably more
-constraint rather than more search — script extents from a second source, or
-opcodes whose operands can be recognised independently, the way text pointers
-were.
+That metric was vacuous, and the reason is worth keeping. Every opcode the
+method could learn was marked *terminating*, because the only evidence available
+was "this opcode accounts for the rest of the script". A walk that stops at its
+first instruction can never run past the end of anything. The measure was
+structurally incapable of failing, and it was presented as the main evidence
+that the widths were right.
+
+The right instinct, applied too late: ask what a metric would look like if the
+thing it measures were broken. "Zero overruns" had the same value under a
+correct table and under a table of nonsense.
+
+With the real widths most opcodes continue rather than terminate, so overruns
+become possible again and the number means something: 168 of 1,502, against
+1,170 scripts walking to completion and 833 landing exactly on a boundary.
+
+The parts the inference did get right are the ones the dialogue work rested on —
+`$51` and `$53` at two operand bytes and terminating, `$0C` at two — so nothing
+downstream was wrong. That is luck rather than method.
 
 ## The font, and the one hardcoded offset
 

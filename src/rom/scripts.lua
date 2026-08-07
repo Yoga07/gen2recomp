@@ -15,6 +15,7 @@
 -- map's script header, which the map attributes record supplies.
 
 local text = require("src.rom.text")
+local script_ops = require("src.rom.script_ops")
 
 local scripts = {}
 
@@ -68,44 +69,90 @@ local function resolve(bank, addr, rom)
   return flat
 end
 
---- Read the text a script displays, if it starts by displaying one.
+-- How many instructions to follow before giving up. Real scripts are far
+-- shorter; this only stops a runaway walk on malformed data.
+scripts.MAX_INSTRUCTIONS = 96
+
+--- Read the text a script displays, following the bytecode rather than looking
+-- at a single instruction.
 --
--- Deliberately shallow: it looks at the first instruction only. A script that
--- begins with a conditional, a movement, or anything else returns nil rather
--- than a guess, and the caller records that the script was not understood.
+-- Walks from the entry point, collecting every text command it passes, and
+-- stops at a terminator, an unknown opcode, or a conditional branch. Branches
+-- end the walk deliberately: following one arm would report dialogue the player
+-- may never see, and following both would report contradictory text as though
+-- it were sequential.
 --
 -- @param bank the bank the script pointer is relative to
 -- @param addr the script's near pointer
--- @return { opcode, opcode_name, text_offset, block } or nil plus a reason
+-- @return { blocks = { {opcode_name, text_offset, block}, ... }, status } or
+--         nil plus a reason
 function scripts.read_text(rom, bank, addr)
   local at = resolve(bank, addr, rom)
   if not at then
     return nil, "script pointer out of range"
   end
 
-  local opcode = rom:u8(at)
-  local name = scripts.text_opcodes[opcode]
-  if not name then
-    return nil, ("opcode $%02X is not a text instruction"):format(opcode)
+  local widths, terminators, names = script_ops.widths()
+  local blocks = {}
+  local status = "ended"
+
+  for _ = 1, scripts.MAX_INSTRUCTIONS do
+    if at + 1 > rom.size then
+      status = "ran past the ROM"
+      break
+    end
+
+    local opcode = rom:u8(at)
+    local width = widths[opcode]
+    if width == nil then
+      status = ("unknown opcode $%02X"):format(opcode)
+      break
+    end
+
+    -- Text commands: near ones point within the script bank, far ones carry
+    -- their own bank byte.
+    local near = script_ops.text_commands[opcode]
+    local far = script_ops.far_text_commands[opcode]
+    local target
+
+    if near then
+      target = resolve(bank, rom:u16le(at + 1), rom)
+    elseif far then
+      local text_bank = rom:u8(at + 1)
+      target = resolve(text_bank, rom:u16le(at + 2), rom)
+    end
+
+    if target then
+      local block = text.decode_dialogue(rom.data, target)
+      if block then
+        blocks[#blocks + 1] = {
+          opcode = opcode,
+          opcode_name = near or far,
+          text_offset = target,
+          block = block,
+        }
+      end
+    end
+
+    at = at + 1 + width
+
+    if terminators[opcode] then
+      break
+    end
+
+    -- Conditionals fork; a linear walk cannot honestly say what happens next.
+    local name = names[opcode]
+    if name and (name:sub(1, 2) == "if" or name == "scall" or name == "farscall") then
+      status = "branched"
+      break
+    end
   end
 
-  local target = resolve(bank, rom:u16le(at + 1), rom)
-  if not target then
-    return nil, "text pointer out of range"
+  if #blocks == 0 then
+    return nil, status == "ended" and "script shows no text" or status
   end
 
-  local block = text.decode_dialogue(rom.data, target)
-  if not block then
-    return nil, ("no dialogue at 0x%06X"):format(target)
-  end
-
-  return {
-    script_offset = at,
-    opcode = opcode,
-    opcode_name = name,
-    text_offset = target,
-    block = block,
-  }
+  return { blocks = blocks, status = status }
 end
 
 --- Read the text for every signpost and NPC on a map.

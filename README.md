@@ -32,7 +32,7 @@ engine does not exist yet.
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Dialogue text and charmap | working |
 | Font | working — the one hardcoded offset, see docs |
-| Map scripts | text-only: 377 of 2200 read |
+| Map scripts | walked for text: 480 of 2200 |
 | Script bytecode beyond text | not started |
 | Battles, menus, audio | not started |
 | Audio | not started |
@@ -117,6 +117,19 @@ src/util/          byte and bit helpers
 docs/              format notes and architecture
 tests/             decoder tests
 ```
+
+## On pokecrystal
+
+The script opcode table in `src/rom/script_ops.lua` — command names and operand
+widths — is written from the [pokecrystal](https://github.com/pret/pokecrystal)
+disassembly's documentation of the script macros.
+
+Nothing from that project is vendored here. It is used as a reference for facts:
+opcode numbers, operand widths, formula constants. Every one of those facts is
+then validated against the cartridge by walking all 1,500 scripts and checking
+where the walks land. Data continues to be *found* by signature search rather
+than by hardcoded offset, so the importer still works across Gold, Silver and
+Crystal from one code path.
 
 ## Legal
 

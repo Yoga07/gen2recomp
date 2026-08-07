@@ -36,6 +36,40 @@ function probe.run(rom_path, report_path)
   local inferred = script_table.infer(rom, sorted)
   log("\nlearned %d opcodes over %d rounds", inferred.learned, inferred.rounds)
 
+  -- Score the inferred table against the reference one. This is the check the
+  -- inference could not perform on itself.
+  local script_ops = require("src.rom.script_ops")
+  local right, wrong, missing = 0, 0, 0
+  local mistakes = {}
+  for opcode, width in pairs(inferred.widths) do
+    local entry = script_ops.table[opcode]
+    if not entry then
+      missing = missing + 1
+    elseif entry[2] == width then
+      right = right + 1
+    else
+      wrong = wrong + 1
+      mistakes[#mistakes + 1] = ("$%02X %s: inferred %d, actually %d")
+        :format(opcode, entry[1], width, entry[2])
+    end
+  end
+  log("\ninference vs reference: %d right, %d wrong, %d unknown to the reference",
+    right, wrong, missing)
+  table.sort(mistakes)
+  for _, mistake in ipairs(mistakes) do
+    log("  %s", mistake)
+  end
+
+  -- And the reference table's own walk, which is the real measure.
+  local ref_widths, ref_terminators = script_ops.widths()
+  local ref = { widths = ref_widths, terminators = ref_terminators }
+  local ref_counts = script_table.score(rom, sorted, ref)
+  log("\nreference table walking the same %d scripts:", #extents)
+  log("  ended on a terminator: %d (%d landing exactly on the boundary)",
+    ref_counts.ended, ref_counts.exact)
+  log("  hit an unknown opcode: %d", ref_counts.unknown)
+  log("  ran past the extent:   %d", ref_counts.overrun)
+
   local list = {}
   for opcode, width in pairs(inferred.widths) do
     list[#list + 1] = { opcode = opcode, width = width }

@@ -857,10 +857,12 @@ local function test_scripts(rom, map_result)
 
       for _, group in ipairs { said.bg, said.objects } do
         for _, found in pairs(group) do
-          by_opcode[found.opcode_name] = (by_opcode[found.opcode_name] or 0) + 1
-          pages_total = pages_total + #found.block.pages
+          for _, entry in ipairs(found.blocks) do
+            by_opcode[entry.opcode_name] = (by_opcode[entry.opcode_name] or 0) + 1
+            pages_total = pages_total + #entry.block.pages
+          end
 
-          local flat = text.flatten(found.block)
+          local flat = text.flatten(found.blocks[1].block)
           if flat == "" then
             empty_blocks = empty_blocks + 1
           elseif #samples < 6 then
@@ -871,9 +873,9 @@ local function test_scripts(rom, map_result)
     end
   end
 
-  check("scripts resolve to text", read > 100,
+  check("scripts resolve to text", read > 400,
     ("%d of %d scripts read as text"):format(read, total))
-  log("        %d of %d scripts are a single text instruction", read, total)
+  log("        %d of %d scripts yield text when walked", read, total)
 
   local opcode_list = {}
   for name, count in pairs(by_opcode) do
@@ -894,7 +896,7 @@ local function test_scripts(rom, map_result)
     if decoded then
       local said = scripts.read_map_text(rom, header, decoded)
       for _, found in pairs(said.bg) do
-        local flat = text.flatten(found.block)
+        local flat = text.flatten(found.blocks[1].block)
         if flat:find("ROUTE") or flat:find("CITY") or flat:find("TOWN") then
           landmarks = landmarks + 1
         end

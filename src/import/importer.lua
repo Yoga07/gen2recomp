@@ -307,11 +307,24 @@ function importer.run(path, progress)
           map_summary.scripts = map_summary.scripts + said.total
           map_summary.scripts_read = map_summary.scripts_read + said.understood
 
+          -- A script may show several messages in sequence; they are
+          -- concatenated into one run of pages so the text box pages through
+          -- the whole conversation.
+          local function pages_of(found)
+            local pages = {}
+            for _, entry in ipairs(found.blocks) do
+              for _, page in ipairs(entry.block.pages) do
+                pages[#pages + 1] = page
+              end
+            end
+            return pages
+          end
+
           for index, found in pairs(said.bg) do
-            record.bg_events[index].text = found.block.pages
+            record.bg_events[index].text = pages_of(found)
           end
           for index, found in pairs(said.objects) do
-            record.objects[index].text = found.block.pages
+            record.objects[index].text = pages_of(found)
           end
         else
           map_summary.event_failures = map_summary.event_failures + 1
