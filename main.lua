@@ -22,6 +22,7 @@ local HEADLESS = {
   ["--probe-text"] = "tests.probe_text",
   ["--probe-font"] = "tests.probe_font",
   ["--probe-scripts"] = "tests.probe_scripts",
+  ["--probe-walker"] = "tests.probe_walker",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }

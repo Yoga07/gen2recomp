@@ -25,6 +25,7 @@ local ow_sprites = require("src.rom.ow_sprites")
 local scripts = require("src.rom.scripts")
 local text = require("src.rom.text")
 local font = require("src.rom.font")
+local script_table = require("src.rom.script_table")
 
 local harness = {}
 
@@ -909,6 +910,51 @@ local function test_scripts(rom, map_result)
   end
 end
 
+--- The inferred script opcode table.
+--
+-- Nothing here checks the widths against a specification, because there is
+-- none. What is checked is that the table explains the cartridge: walks land
+-- exactly on script boundaries and never overshoot. An overrun means a width is
+-- wrong, so holding that at zero is the real assertion.
+local function test_script_table(rom, map_result)
+  log("\n== script opcode table ==")
+  if not map_result then
+    log("  SKIP  maps were not located")
+    return
+  end
+
+  local sorted, total = script_table.collect_entries(rom, map_result, events)
+  local extents = script_table.extents(sorted)
+  log("        %d script pointers, %d with a usable extent", total, #extents)
+
+  local inferred = script_table.infer(rom, sorted)
+  check("inference learns a useful number of opcodes", inferred.learned >= 20,
+    ("learned %d"):format(inferred.learned))
+  log("        learned %d opcodes over %d rounds", inferred.learned, inferred.rounds)
+
+  -- The bootstrap: 3-byte scripts fix the common openers at two operand bytes.
+  check_equal("$53 takes two operand bytes", inferred.widths[0x53], 2)
+  check_equal("$51 takes two operand bytes", inferred.widths[0x51], 2)
+  check_equal("$91 takes none and ends the script", inferred.widths[0x91], 0)
+  check("$91 is a terminator", inferred.terminators[0x91] == true)
+
+  local counts = script_table.score(rom, sorted, inferred)
+  log("        walks: %d ended (%d exact), %d blocked, %d overran",
+    counts.ended, counts.exact, counts.unknown, counts.overrun)
+
+  -- The assertion that matters. A wrong width desynchronises the walk and it
+  -- sails past the script boundary; zero overruns across 1500 scripts is what
+  -- says the widths are right.
+  check_equal("no walk overruns its script", counts.overrun, 0)
+
+  check("most completed walks land exactly on the boundary",
+    counts.exact >= counts.ended * 0.9,
+    ("%d of %d exact"):format(counts.exact, counts.ended))
+
+  check("a substantial share of scripts walk to completion",
+    counts.ended >= 700, ("%d of %d"):format(counts.ended, #extents))
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1060,6 +1106,7 @@ function harness.run(rom_path, report_path)
     test_ow_sprites(rom, map_result)
     test_font(rom)
     test_scripts(rom, map_result)
+    test_script_table(rom, map_result)
     rom:release()
     test_engine()
   end

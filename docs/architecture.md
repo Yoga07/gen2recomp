@@ -307,11 +307,63 @@ is interpreted. The decoder reads only the first instruction and returns nothing
 rather than guessing, so what it produces is trustworthy and the rest is visibly
 absent instead of quietly wrong.
 
-`$91` is `end`, identified by sitting immediately before the next script 607
-times, and `$4C` is recognised but never fires because it appears mid-script.
-Both are recorded as the starting points for a real walker: with script extents
-recoverable from the gaps between consecutive entry points, operand widths can
-be inferred by requiring a walk to consume its extent exactly.
+## Inferring the opcode table
+
+There is no operand-width table to read, and 256 opcodes at unknown widths is
+far too large a space to guess in. What makes it tractable is that scripts are
+stored back to back, so sorting the entry points within a bank gives each
+script's extent from the gap to the next one.
+
+That converts guessing into a constraint. A correct width is one where walking a
+script consumes its extent *exactly* and stops on a terminating instruction;
+wrong widths desynchronise and sail past the boundary. Widths can then be
+learned:
+
+- A script whose whole extent is one instruction fixes that opcode directly and
+  marks it terminating. 633 scripts are exactly three bytes, which bootstraps
+  the common openers at two operand bytes.
+- With some widths known, a script that walks cleanly up to a single unknown
+  fixes that one too.
+- Repeat.
+
+Every proposal is a vote, accepted only when several scripts agree and almost
+none disagree, so one misread extent cannot poison the table. The result is 24
+opcodes, and across 1,502 scripts with known extents: 764 walk to a terminator,
+711 of those landing exactly on the boundary, and **zero overrun**. Zero
+overruns is the real evidence — a wrong width shows up as a walk that runs past
+the end of its script, and none do.
+
+### Solving two unknowns at once does not work
+
+The obvious next step is to break the deadlock on opcodes like `$6B`, which
+opens 249 scripts and never once appears mid-script, so there is no position
+from which its width can be read off alone. Searching for pairs of widths that
+jointly explain a script sounds like the answer.
+
+It was tried and it is much worse. Two free unknowns across widths 0-8 give
+enough freedom that almost any script admits *some* assignment, and requiring
+uniqueness barely filters it. The table it produced assigned six opcodes the
+maximum width of 8 — the signature of a search fitting noise — lost the
+correctly-learned `$51` and `$53`, and introduced 52 overruns where there had
+been none.
+
+The lesson is about the ratio of constraint to freedom. Single-unknown inference
+works because one script pins one number. Two unknowns and one equation is
+underdetermined, and dressing it up as a search does not add information.
+
+### What this has and has not bought
+
+The table is real and validated, and it gives a disassembler. It has not
+increased how much dialogue is readable, and it is worth being clear why: every
+opcode learned so far is a terminating one, so a walk stops at the first
+instruction and finds exactly the text that reading the first instruction
+already found. Coverage stays at 377.
+
+Getting past that needs the non-terminating opcodes, and those are precisely the
+ones single-unknown inference cannot reach. The way through is probably more
+constraint rather than more search — script extents from a second source, or
+opcodes whose operands can be recognised independently, the way text pointers
+were.
 
 ## The font, and the one hardcoded offset
 
