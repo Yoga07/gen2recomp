@@ -453,6 +453,42 @@ stored per cell as four bytes per block. Rendering goes to a 160x144 canvas —
 the hardware's resolution — scaled by whole numbers only, because fractional
 scaling makes tile edges visibly uneven on this art.
 
+## Battles
+
+The damage formula is integer arithmetic from end to end, because the hardware
+had no other kind and the truncation is load-bearing — rounding at the wrong
+step gives damage that is close and wrong.
+
+    base   = (2 * level / 5 + 2) * power * attack / defence / 50
+    crit   doubles that
+    + 2
+    STAB   x1.5 when the move shares a type with its user
+    type   x2 or x0.5 per defending type, or x0
+    spread x(217..255) / 255
+    at least 1, unless the type chart said no effect
+
+Type effectiveness is kept in tenths so the whole calculation stays in
+integers, and a double weakness stays exact rather than accumulating float
+error.
+
+Two Gen 2 specifics that a table copied from a later generation would get
+wrong, so both are asserted: **physical or special is decided by the move's
+type, not per move** — everything from normal through steel is physical, fire
+onwards is special — and **Dark is immune to Psychic**, with Ghost super
+effective against it.
+
+### Movesets are a stand-in
+
+Level-up learnsets are not extracted yet. `pokemon.default_moves` picks damaging
+moves whose type the species shares, strongest first, capped by level. That
+produces a Pokémon that can fight and is not what the real game would give it.
+Replacing it with real learnsets is the next battle-side job, and it is called a
+stand-in in the code so nobody mistakes it for the real thing.
+
+What else is absent, deliberately rather than by oversight: status conditions,
+stat stages, move effects beyond damage, move priority, catching, items, and
+switching. The battle loop is the skeleton those hang from.
+
 ## What is not decided yet
 
 - **Map representation.** Gen 2 maps are block-based: a tileset defines 4x4-tile

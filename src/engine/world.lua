@@ -141,6 +141,22 @@ function world:tileset(index)
   return self.images[index] or nil
 end
 
+--- A species' front sprite, as written by the importer.
+function world:species_sprite(species)
+  self.species_images = self.species_images or {}
+  if self.species_images[species] == nil then
+    local path = ("%s/sprites/%03d_front.png"):format(cache.dir(self.game), species)
+    if not love.filesystem.getInfo(path) then
+      self.species_images[species] = false
+    else
+      local image = love.graphics.newImage(path)
+      image:setFilter("nearest", "nearest")
+      self.species_images[species] = image
+    end
+  end
+  return self.species_images[species] or nil
+end
+
 function world:map(index)
   return self.maps[index]
 end

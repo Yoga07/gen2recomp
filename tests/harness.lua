@@ -1157,6 +1157,113 @@ local function test_pokemon(base_stats, species_names)
   end
 end
 
+--- The type chart and the damage formula.
+--
+-- Type matchups are checked against relationships every player knows, which is
+-- the only independent check available for a table transcribed from a
+-- reference. Damage is checked by computing the formula by hand.
+local function test_battle(base_stats, move_records, species_names, move_names)
+  log("\n== battle ==")
+  if not base_stats or not move_records then
+    log("  SKIP  base stats or moves were not located")
+    return
+  end
+
+  local types = require("src.engine.types")
+  local battle = require("src.engine.battle")
+  local pokemon = require("src.engine.pokemon")
+  local stats = base_stats.records
+  local moves = move_records.records
+
+  -- Matchups nobody disputes.
+  check_equal("water beats fire", types.against("water", "fire"), types.SUPER)
+  check_equal("fire is weak to water", types.against("fire", "water"), types.NOT_VERY)
+  check_equal("electric cannot hit ground", types.against("electric", "ground"), 0)
+  check_equal("ghost cannot hit normal", types.against("ghost", "normal"), 0)
+  check_equal("normal on normal is neutral",
+    types.against("normal", "normal"), types.NORMAL)
+
+  -- Gen 2 specifics that later games changed, so a table copied from the wrong
+  -- generation would fail here.
+  check_equal("ghost beats psychic in Gen 2",
+    types.against("ghost", "psychic"), types.SUPER)
+  check_equal("dark resists psychic entirely",
+    types.against("psychic", "dark"), 0)
+  check_equal("steel resists ice", types.against("ice", "steel"), types.NOT_VERY)
+
+  -- Stacking across a dual type: fire on a grass/steel target is 2x * 2x.
+  check_equal("double weakness stacks",
+    types.effectiveness("fire", { "grass", "steel" }), 40)
+  check_equal("weakness and resistance cancel",
+    types.effectiveness("water", { "fire", "grass" }), 10)
+  check_equal("a duplicated type only counts once",
+    types.effectiveness("water", { "fire", "fire" }), 20)
+
+  -- Gen 2 splits physical and special by type, not by move.
+  check("normal is physical", types.is_physical("normal"))
+  check("fire is special", not types.is_physical("fire"))
+
+  -- Damage, computed by hand. A level 10 attacker, 30 attack, against 30
+  -- defence, with a 40-power same-type-less move, no crit, top of the spread:
+  --   base = floor(2*10/5 + 2) = 6
+  --   6 * 40 * 30 / 30 / 50 = floor(240/50) = 4
+  --   +2 = 6
+  local attacker = pokemon.new(19, stats[19], { level = 10,
+    dvs = { attack = 0, defense = 0, speed = 0, special = 0 } })
+  local defender = pokemon.new(19, stats[19], { level = 10,
+    dvs = { attack = 0, defense = 0, speed = 0, special = 0 } })
+
+  local fixed = { power = 40, type = "psychic", accuracy = 255 }
+  local damage = battle.damage(attacker, defender, fixed,
+    { crit = false, spread = battle.SPREAD_HIGH })
+  check("a plain hit does sensible damage", damage > 0 and damage < defender.stats.hp,
+    ("%d damage against %d HP"):format(damage, defender.stats.hp))
+
+  -- A critical hit must beat a normal one, and STAB must beat neither-type.
+  local plain = battle.damage(attacker, defender, fixed,
+    { crit = false, spread = battle.SPREAD_HIGH })
+  local crit = battle.damage(attacker, defender, fixed,
+    { crit = true, spread = battle.SPREAD_HIGH })
+  check("critical hits hurt more", crit > plain, ("%d vs %d"):format(crit, plain))
+
+  local stab = battle.damage(attacker, defender,
+    { power = 40, type = attacker.types[1], accuracy = 255 },
+    { crit = false, spread = battle.SPREAD_HIGH })
+  check("same-type attacks hurt more", stab > plain,
+    ("%d vs %d"):format(stab, plain))
+
+  -- No effect means no damage at all, not one point.
+  local ghost_defender = pokemon.new(92, stats[92], { level = 10,
+    dvs = { attack = 0, defense = 0, speed = 0, special = 0 } })
+  local nothing = battle.damage(attacker, ghost_defender,
+    { power = 40, type = "normal", accuracy = 255 },
+    { crit = false, spread = battle.SPREAD_HIGH })
+  check_equal("an immune target takes nothing", nothing, 0)
+
+  -- A whole battle must terminate rather than loop, and the loser must be the
+  -- one on zero HP.
+  local names = species_names or {}
+  local fight = battle.new(
+    pokemon.new(25, stats[25], { level = 50 }),
+    pokemon.new(19, stats[19], { level = 3 }),
+    moves, move_names or {}, names)
+
+  local turns = 0
+  while not fight.over and turns < 200 do
+    turns = turns + 1
+    fight:turn(1, 1, { crit = false, spread = battle.SPREAD_HIGH, coin = 0 })
+  end
+
+  check("a battle reaches a conclusion", fight.over,
+    ("%d turns elapsed"):format(turns))
+  check_equal("the level 50 wins against the level 3", fight.winner, "player")
+  check("the loser is on zero HP", fight.opponent.hp == 0)
+  log("        battle resolved in %d turns", turns)
+  for _, line in ipairs(fight.log) do
+    log("          %s", line)
+  end
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1408,6 +1515,9 @@ function harness.run(rom_path, report_path)
     test_battle_data(rom, found and found.species_names and found.species_names.records)
     test_pokemon(found and found.base_stats,
       found and found.species_names and found.species_names.records)
+    test_battle(found and found.base_stats, found and found.moves,
+      found and found.species_names and found.species_names.records,
+      found and found.move_names and found.move_names.records)
     rom:release()
     test_engine()
   end

@@ -9,6 +9,7 @@ local player = require("src.engine.player")
 local cache = require("src.import.cache")
 local wild = require("src.engine.wild")
 local pokemon = require("src.engine.pokemon")
+local battle = require("src.engine.battle")
 
 local game = {}
 game.__index = game
@@ -53,6 +54,8 @@ function game.new(game_id, start_index)
   instance.bitmap_font = require("src.engine.bitmap_font").load(game_id)
   instance.species_names = cache.read(game_id, "species_names")
   instance.base_stats = cache.read(game_id, "base_stats")
+  instance.move_records = cache.read(game_id, "moves")
+  instance.move_name_records = cache.read(game_id, "move_names")
 
   instance:enter(start_index or instance:default_map())
   return instance
@@ -160,6 +163,11 @@ function game:show_first_encounter()
             end)
             if met then
               self:wild_encounter(met)
+              -- Run one turn so the screenshot shows a battle in progress
+              -- rather than only the opening line.
+              if self.battle then
+                self:battle_advance()
+              end
               return true
             end
           end
@@ -208,6 +216,11 @@ end
 --- Interact with whatever is in front of the player, or advance the dialogue
 -- already on screen.
 function game:interact()
+  if self.battle then
+    self:battle_advance()
+    return
+  end
+
   if self.dialogue then
     self.dialogue.page = self.dialogue.page + 1
     if self.dialogue.page > #self.dialogue.pages then
@@ -227,8 +240,8 @@ function game:interact()
 end
 
 function game:update(dt)
-  -- Movement stops while the text box is up, the way it does in the original.
-  if self.dialogue then
+  -- Movement stops while a battle or a text box is up.
+  if self.battle or self.dialogue then
     return
   end
 
@@ -299,35 +312,45 @@ end
 --
 -- There is no battle yet, so this announces the encounter through the text box.
 -- When the battle engine exists this is where it hands over.
-function game:wild_encounter(met)
-  local names = self.species_names or {}
-  local name = names[met.species] or ("#" .. met.species)
-
-  -- Build the actual Pokémon: DVs are rolled now, and everything else follows
-  -- from them and the species' base stats.
-  local base = self.base_stats and self.base_stats[met.species]
-  if base then
-    self.wild = pokemon.wild(met.species, base, met.level)
-  end
-
-  local lines = {
-    ("Wild %s"):format(name),
-    ("appeared!  L%d"):format(met.level),
-  }
-  if self.wild then
-    lines[#lines + 1] = ("HP %d  ATK %d")
-      :format(self.wild.stats.hp, self.wild.stats.attack)
-    if self.wild.shiny then
-      lines[#lines + 1] = "It is shiny!"
+--- Give the player a Pokémon to fight with.
+--
+-- There is no save file and no starter choice yet, so the party is one
+-- Cyndaquil, built the moment it is first needed.
+function game:party_leader()
+  if not self.party_member then
+    local base = self.base_stats and self.base_stats[155]
+    if not base then
+      return nil
     end
+    self.party_member = pokemon.new(155, base, { level = 10 })
+    self.party_member.moves =
+      pokemon.default_moves(self.party_member, self.move_records or {})
+  end
+  return self.party_member
+end
+
+function game:wild_encounter(met)
+  local base = self.base_stats and self.base_stats[met.species]
+  local leader = self:party_leader()
+  if not base or not leader then
+    return
   end
 
-  local page = {}
-  for _, line in ipairs(lines) do
-    page[#page + 1] = { text = line, codes = self:encode(line) }
-  end
+  local opponent = pokemon.wild(met.species, base, met.level)
+  opponent.moves = pokemon.default_moves(opponent, self.move_records or {})
 
-  self.dialogue = { pages = { page }, page = 1 }
+  -- Heal the player's Pokémon between encounters; there is nowhere to rest yet.
+  leader.hp = leader.stats.hp
+
+  self.battle = battle.new(leader, opponent, self.move_records or {},
+    self.move_name_records or {}, self.species_names or {})
+  self.battle_lines = {
+    ("Wild %s appeared!"):format(self.species_names[met.species] or "?"),
+  }
+  if opponent.shiny then
+    self.battle_lines[#self.battle_lines + 1] = "It is shiny!"
+  end
+  self.battle_menu = 1
 end
 
 --- Encode plain ASCII into the cartridge's character codes, so runtime messages
@@ -349,9 +372,119 @@ function game:encode(str)
       codes[#codes + 1] = 0xE7
     elseif char == "." then
       codes[#codes + 1] = 0xE8
+    elseif char == "/" then
+      codes[#codes + 1] = 0xF3
+    elseif char == "," then
+      codes[#codes + 1] = 0xF4
+    elseif char == "?" then
+      codes[#codes + 1] = 0xE6
+    elseif char == "-" then
+      codes[#codes + 1] = 0xE3
+    elseif char == "'" then
+      codes[#codes + 1] = 0xE0
+    elseif char == ":" then
+      codes[#codes + 1] = 0x9C
     end
   end
   return codes
+end
+
+--- Advance the battle: run a turn, or dismiss it once it is over.
+function game:battle_advance()
+  if not self.battle then
+    return
+  end
+
+  if self.battle.over then
+    self.battle = nil
+    self.battle_lines = nil
+    return
+  end
+
+  local leader = self.battle.player
+  local opponent = self.battle.opponent
+  local player_move = leader.moves[self.battle_menu] or leader.moves[1]
+    or pokemon.STRUGGLE
+  -- The opponent picks at random; there is no battle AI yet.
+  local opponent_move = opponent.moves[math.random(1, math.max(#opponent.moves, 1))]
+    or pokemon.STRUGGLE
+
+  self.battle_lines = self.battle:turn(player_move, opponent_move)
+  if #self.battle_lines == 0 then
+    self.battle_lines = { "Nothing happened." }
+  end
+end
+
+--- Draw one health bar.
+local function health_bar(x, y, width, current, maximum)
+  love.graphics.setColor(0.1, 0.1, 0.1)
+  love.graphics.rectangle("line", x - 0.5, y - 0.5, width + 1, 4)
+  local fraction = math.max(0, current) / math.max(maximum, 1)
+  love.graphics.setColor(0.1, 0.1, 0.1)
+  love.graphics.rectangle("fill", x, y, math.floor(width * fraction), 3)
+end
+
+--- The battle screen, at the hardware's resolution.
+function game:draw_battle()
+  local leader = self.battle.player
+  local opponent = self.battle.opponent
+
+  love.graphics.clear(1, 1, 1)
+  love.graphics.setColor(1, 1, 1)
+
+  -- The opponent, drawn from its own front sprite.
+  local sprite = self.world:species_sprite(opponent.species)
+  if sprite then
+    love.graphics.draw(sprite, game.SCREEN_WIDTH - sprite:getWidth() - 8, 6)
+  end
+
+  local function label(x, y, instance)
+    local name = self.species_names[instance.species] or "?"
+    if self.bitmap_font then
+      self.bitmap_font:draw_codes(self:encode(name), x, y)
+      self.bitmap_font:draw_codes(self:encode(("L%d"):format(instance.level)),
+        x, y + 10)
+    end
+    health_bar(x, y + 21, 48, instance.hp, instance.stats.hp)
+    if self.bitmap_font then
+      self.bitmap_font:draw_codes(
+        self:encode(("%d/%d"):format(instance.hp, instance.stats.hp)), x, y + 26)
+    end
+  end
+
+  love.graphics.setColor(0.1, 0.1, 0.1)
+  label(6, 8, opponent)
+  label(88, 62, leader)
+
+  -- The message box.
+  local top = game.SCREEN_HEIGHT - 48
+  love.graphics.setColor(1, 1, 1)
+  love.graphics.rectangle("fill", 0, top, game.SCREEN_WIDTH, 48)
+  love.graphics.setColor(0.1, 0.1, 0.1)
+  love.graphics.rectangle("line", 2.5, top + 2.5, game.SCREEN_WIDTH - 5, 43)
+
+  -- The screen fits 19 glyphs at eight pixels each, so anything longer has to
+  -- wrap rather than run off the edge.
+  if self.bitmap_font then
+    local wrapped = {}
+    for _, line in ipairs(self.battle_lines or {}) do
+      while #line > 19 do
+        local cut = line:sub(1, 19):match(".*%s()") or 20
+        wrapped[#wrapped + 1] = line:sub(1, cut - 1)
+        line = line:sub(cut)
+      end
+      wrapped[#wrapped + 1] = line
+    end
+
+    -- Show the last four lines, so the most recent events stay visible.
+    local first = math.max(1, #wrapped - 3)
+    for i = first, #wrapped do
+      self.bitmap_font:draw_codes(self:encode(wrapped[i]), 6,
+        top + 6 + (i - first) * 10)
+    end
+  end
+
+  love.graphics.setColor(1, 1, 1)
 end
 
 function game:draw(scale)
@@ -368,6 +501,18 @@ function game:draw(scale)
   camera_x, camera_y = math.floor(camera_x), math.floor(camera_y)
 
   love.graphics.setCanvas(self.canvas)
+
+  -- A battle replaces the overworld entirely.
+  if self.battle then
+    self:draw_battle()
+    love.graphics.setCanvas()
+    love.graphics.setColor(1, 1, 1)
+    local bx = math.floor((love.graphics.getWidth() - game.SCREEN_WIDTH * scale) / 2)
+    local by = math.floor((love.graphics.getHeight() - game.SCREEN_HEIGHT * scale) / 2)
+    love.graphics.draw(self.canvas, bx, by, 0, scale, scale)
+    return
+  end
+
   love.graphics.clear(0, 0, 0)
   love.graphics.setColor(1, 1, 1)
 

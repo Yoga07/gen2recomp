@@ -134,4 +134,45 @@ function pokemon.is_fainted(instance)
   return instance.hp <= 0
 end
 
+-- Struggle, which every Pokémon can always use.
+pokemon.STRUGGLE = 165
+
+--- Choose a plausible moveset.
+--
+-- A STAND-IN. Level-up learnsets are not extracted yet, so this picks damaging
+-- moves whose type the species shares, strongest first, and falls back to
+-- Struggle. The result is a Pokémon that can fight; it is not the moveset the
+-- real game would give it, and swapping this for real learnsets is the next
+-- piece of work on the battle side.
+function pokemon.default_moves(instance, moves)
+  local candidates = {}
+  for id, move in ipairs(moves) do
+    if move.power and move.power > 0 and id ~= pokemon.STRUGGLE then
+      for _, own in ipairs(instance.types) do
+        if move.type == own then
+          candidates[#candidates + 1] = { id = id, power = move.power }
+          break
+        end
+      end
+    end
+  end
+
+  -- Strongest first, but capped by level so a level 5 does not open with
+  -- something devastating.
+  table.sort(candidates, function(a, b) return a.power > b.power end)
+  local ceiling = 30 + instance.level * 2
+
+  local chosen = {}
+  for _, candidate in ipairs(candidates) do
+    if candidate.power <= ceiling and #chosen < 4 then
+      chosen[#chosen + 1] = candidate.id
+    end
+  end
+
+  if #chosen == 0 then
+    chosen[1] = pokemon.STRUGGLE
+  end
+  return chosen
+end
+
 return pokemon

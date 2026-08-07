@@ -35,17 +35,21 @@ engine does not exist yet.
 | **Engine:** overworld rendering, movement, warps | working |
 | **Engine:** wild encounter trigger | working — grass, and cave floor |
 | **Engine:** Pokémon stats and party | working |
+| **Engine:** battles — types, damage, turn order | working |
 | Map scripts | walked for text: 480 of 2200 |
+| Level-up learnsets | not extracted — movesets are a stand-in |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Script bytecode beyond text | not started |
-| Battles, menus, save, audio | not started |
+| Status conditions, stat stages, catching, items | not started |
+| Menus, save, audio | not started |
 | Map edge connections | extracted, not implemented |
 
-You can walk around. Import a cartridge, press enter, and move with the arrow
-keys or WASD; doors warp between maps, and the player and NPCs are drawn with
-the cartridge's own sprites. Press Z or space to read a signpost.
+You can walk around and fight. Import a cartridge, press enter, and move with
+the arrow keys or WASD; doors warp between maps, and the player and NPCs are
+drawn with the cartridge's own sprites. Press Z or space to read a signpost or
+talk to someone. Walking in tall grass starts a battle — Z advances a turn.
 
-161 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+181 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
