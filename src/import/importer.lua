@@ -299,7 +299,8 @@ function importer.run(path, progress)
   -- produce images nothing reads. `--dump-maps` renders them when a human needs
   -- to look.
   local map_summary = { count = 0, blocks = 0, warps = 0, objects = 0,
-                        event_failures = 0, scripts = 0, scripts_read = 0 }
+                        event_failures = 0, scripts = 0, scripts_read = 0,
+                        with_encounters = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -386,16 +387,63 @@ function importer.run(path, progress)
         ::continue::
       end
 
+      -- Wild encounters are keyed by (group, number), so they can only be
+      -- attached to maps once the group table is known.
+      local encounter_by_map = {}
+      local function key_of(group, number)
+        return group * 256 + number
+      end
+      if grass then
+        for _, run in ipairs(grass) do
+          for _, entry in ipairs(run.entries) do
+            encounter_by_map[key_of(entry.group, entry.map)] = entry
+          end
+        end
+      end
+
       -- Warps name their destination by (group, number), so the group table is
       -- what makes them followable.
       local groups, group_err = maps.locate_groups(rom, map_result.headers)
+      local group_index, group_of = nil, {}
       if groups then
         offsets.map_groups = groups.offset
-        cache.write(descriptor.game, "map_groups",
-          maps.group_index(map_result.headers, groups.groups))
+        group_index = maps.group_index(map_result.headers, groups.groups)
+        cache.write(descriptor.game, "map_groups", group_index)
         map_summary.groups = #groups.groups
+
+        -- Invert the group starts into per-map (group, number), which is how
+        -- everything outside the map tables addresses a map.
+        local starts = {}
+        for group, start in pairs(group_index) do
+          starts[#starts + 1] = { group = group, start = start }
+        end
+        table.sort(starts, function(a, b) return a.start < b.start end)
+
+        for i, entry in ipairs(starts) do
+          local last = starts[i + 1] and starts[i + 1].start - 1
+            or #map_result.headers
+          for index = entry.start, last do
+            group_of[index] = { group = entry.group, number = index - entry.start + 1 }
+          end
+        end
       else
         failed.map_groups = group_err
+      end
+
+      -- Second pass: now that maps can be addressed by (group, number), give
+      -- each its own id and attach whatever wild encounters it has.
+      for index, record in ipairs(records) do
+        local where = group_of[index]
+        if where then
+          record.group = where.group
+          record.number = where.number
+
+          local entry = encounter_by_map[key_of(where.group, where.number)]
+          if entry and not record.unparsed then
+            record.encounters = { rates = entry.rates, slots = entry.slots }
+            map_summary.with_encounters = map_summary.with_encounters + 1
+          end
+        end
       end
 
       cache.write(descriptor.game, "maps", records)
@@ -492,6 +540,8 @@ function importer.format_report(report)
         report.maps.event_failures)
     lines[#lines + 1] = ("  %-16s %4d of %d scripts read as text")
       :format("scripts", report.maps.scripts_read, report.maps.scripts)
+    lines[#lines + 1] = ("  %-16s %4d maps carry wild encounters")
+      :format("encounters", report.maps.with_encounters)
   end
 
   if next(report.failed) then

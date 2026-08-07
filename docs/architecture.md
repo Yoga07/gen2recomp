@@ -409,27 +409,36 @@ was finally settled was rendering a string whose correct appearance was known �
 every candidate bias and seeing which row came out legible. When a heuristic
 keeps producing confident wrong answers, render the thing and look at it.
 
-## Collision is provisional
+## Collision, and two wrong assumptions
 
-`world.WALL_COLLISION = $07` and everything else is walkable. That is not right,
-and the code says so.
+Collision values are global terrain constants, classified in
+`src/rom/collision.lua`: floor, tall grass, water, ledges, warps, furniture, and
+everything else blocking. The walkable share of the world drops from 58% under
+the old provisional rule to 44%, which is a far more believable number once
+water, counters, ledges and cut trees stop counting as passable.
 
-The evidence for `$07` is strong and visual: tinting it across whole maps lands
-it exactly on buildings, cliff faces and ledges. The evidence against treating
-everything else as passable is equally clear — doors, water and rock faces are
-distinct values that are not all walkable, and the current rule reports 58% of
-all cells walkable, which is too generous.
+The earlier survey that could not settle this was asking the wrong question. It
+counted what the game's NPCs stand on and found 466 of them apparently on `$07`,
+seemingly disproving `$07` as wall. The flaw was the premise: NPCs are placed on
+counters and furniture and behind blocking terrain all the time — a shop clerk
+stands behind a counter, not on the floor — so "an NPC is here" was never
+evidence that a tile is walkable.
 
-Two attempts to derive the meaning of the remaining values did not settle it.
-Surveying which values sit under the game's 1,300 warps and 1,466 NPCs — places
-the player provably stands — returns thirty distinct values, and 466 NPCs
-apparently stand on `$07` itself, which contradicts it being a wall. Testing
-both quadrant orderings changed nothing (52% versus 50%), so the lookup is not
-misindexed.
+Adopting the real constants then failed two tests, and both were the tests'
+fault rather than the classification's.
 
-That contradiction is unresolved. It is good enough to walk around with and it
-is not correct, which is why it is one constant with a comment rather than a
-table pretending to authority.
+**Doors are walls.** 544 of Crystal's 1,300 warps sit on `$07`. A door is a wall
+tile with a warp on it; the player walks *into* it and the warp fires on the
+attempt. So "every warp is walkable" is false, and the engine needs
+`can_enter` — walkable, or carrying a warp — as distinct from `walkable`.
+
+**Caves have no grass.** Only 25 of the 91 maps with encounter tables have any
+grass tiles. Wild Pokémon in caves and dungeons appear on ordinary floor, so the
+encounter check consults the map's environment as well as the terrain.
+
+One thing remains unexplained and is left that way: 25 maps have grass tiles and
+no encounter table. It is logged rather than asserted around, because picking a
+threshold that happens to pass would hide it.
 
 ## The engine reads only the cache
 

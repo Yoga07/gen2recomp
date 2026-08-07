@@ -25,15 +25,7 @@ world.CELLS_PER_BLOCK = 2
 world.TILE_PIXELS = 8
 world.TILES_PER_BLOCK_EDGE = 4
 
--- Buildings, cliffs and ledges all carry this value, confirmed by tinting it
--- across whole maps and seeing it land exactly on solid geometry.
---
--- PROVISIONAL. Treating everything else as walkable is too permissive: doors,
--- water and rock faces are distinct values that are not all passable, and the
--- occupancy survey found 466 NPCs apparently standing on $07, which contradicts
--- it being a wall and is not yet explained. Good enough to walk around with,
--- not yet correct. See docs/architecture.md.
-world.WALL_COLLISION = 0x07
+local collision = require("src.rom.collision")
 
 --- Load a game's cache.
 -- @return world instance, or nil plus a reason
@@ -193,7 +185,31 @@ function world:walkable(map, cell_x, cell_y)
   if not value then
     return false
   end
-  return value ~= world.WALL_COLLISION
+  return collision.walkable(value)
+end
+
+--- May the player move onto this cell?
+--
+-- Not the same as walkable. A door is a wall tile with a warp on it — 544 of
+-- Crystal's 1300 warps sit on $07 — and the player enters it, triggering the
+-- warp, rather than standing on it. So a warp overrides terrain.
+function world:can_enter(map, cell_x, cell_y)
+  if self:warp_at(map, cell_x, cell_y) then
+    return true
+  end
+  return self:walkable(map, cell_x, cell_y)
+end
+
+--- Does this cell roll for a wild encounter when stepped on?
+function world:is_grass(map, cell_x, cell_y)
+  local value = self:collision_at(map, cell_x, cell_y)
+  return value ~= nil and collision.is_grass(value)
+end
+
+--- What kind of terrain a cell is, for the engine to reason about.
+function world:terrain(map, cell_x, cell_y)
+  local value = self:collision_at(map, cell_x, cell_y)
+  return value and collision.kind(value) or nil
 end
 
 --- The warp on this cell, if any.

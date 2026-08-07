@@ -7,6 +7,7 @@
 local world = require("src.engine.world")
 local player = require("src.engine.player")
 local cache = require("src.import.cache")
+local wild = require("src.engine.wild")
 
 local game = {}
 game.__index = game
@@ -49,6 +50,7 @@ function game.new(game_id, start_index)
   -- The cartridge's own font, when the import produced one. Falls back to
   -- LOVE's font rather than refusing to show text.
   instance.bitmap_font = require("src.engine.bitmap_font").load(game_id)
+  instance.species_names = cache.read(game_id, "species_names")
 
   instance:enter(start_index or instance:default_map())
   return instance
@@ -139,6 +141,33 @@ function game:show_first_sign(kind)
   return false
 end
 
+--- Stand on the first grass tile in the game and force an encounter.
+-- Used by the screenshot mode to exercise the whole path from collision
+-- classification through the encounter tables to the text box.
+function game:show_first_encounter()
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed and map.encounters then
+      for cell_y = 0, map.height * world.CELLS_PER_BLOCK - 1 do
+        for cell_x = 0, map.width * world.CELLS_PER_BLOCK - 1 do
+          if self.world:is_grass(map, cell_x, cell_y) then
+            self:enter(index, cell_x, cell_y, "down")
+            -- A fixed roll, so the screenshot is reproducible.
+            local met = wild.roll(map.encounters, "day", function(low, high)
+              return low
+            end)
+            if met then
+              self:wild_encounter(met)
+              return true
+            end
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
 function game:held_direction()
   for key, direction in pairs(KEYS) do
     if love.keyboard.isDown(key) then
@@ -210,13 +239,23 @@ function game:update(dt)
 
   local event, cell_x, cell_y = self.player:update(dt, self:held_direction(),
     function(x, y)
-      return self.world:walkable(self.map, x, y)
+      return self.world:can_enter(self.map, x, y)
     end)
 
   if event == "arrived" then
     local warp = self.world:warp_at(self.map, cell_x, cell_y)
     if warp then
       self:take_warp(warp)
+      return
+    end
+
+    -- Grass rolls for an encounter, and so does bare floor in a cave.
+    local terrain = self.world:terrain(self.map, cell_x, cell_y)
+    if wild.rolls_here(terrain, self.map.environment) then
+      local met = wild.roll(self.map.encounters)
+      if met then
+        self:wild_encounter(met)
+      end
     end
   end
 end
@@ -252,6 +291,50 @@ function game:take_warp(warp)
   end
   self:notify(("map %d  %dx%d  %s"):format(index, destination.width,
     destination.height, destination.environment or "?"))
+end
+
+--- A wild Pokémon appeared.
+--
+-- There is no battle yet, so this announces the encounter through the text box.
+-- When the battle engine exists this is where it hands over.
+function game:wild_encounter(met)
+  local names = self.species_names or {}
+  local name = names[met.species] or ("#" .. met.species)
+
+  self.dialogue = {
+    pages = {
+      {
+        { text = "Wild " .. name .. "", codes = self:encode(("Wild %s"):format(name)) },
+        { text = ("appeared!  L%d"):format(met.level),
+          codes = self:encode(("appeared!  L%d"):format(met.level)) },
+      },
+    },
+    page = 1,
+  }
+end
+
+--- Encode plain ASCII into the cartridge's character codes, so runtime messages
+-- can be drawn with the same font as the cartridge's own text.
+function game:encode(str)
+  local codes = {}
+  for i = 1, #str do
+    local char = str:sub(i, i)
+    local byte_value = char:byte()
+    if char >= "A" and char <= "Z" then
+      codes[#codes + 1] = 0x80 + byte_value - 65
+    elseif char >= "a" and char <= "z" then
+      codes[#codes + 1] = 0xA0 + byte_value - 97
+    elseif char >= "0" and char <= "9" then
+      codes[#codes + 1] = 0xF6 + byte_value - 48
+    elseif char == " " then
+      codes[#codes + 1] = 0x7F
+    elseif char == "!" then
+      codes[#codes + 1] = 0xE7
+    elseif char == "." then
+      codes[#codes + 1] = 0xE8
+    end
+  end
+  return codes
 end
 
 function game:draw(scale)

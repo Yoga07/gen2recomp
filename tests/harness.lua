@@ -1145,6 +1145,102 @@ local function test_engine()
   log("        %d of %d cells walkable (%d%%)", walkable_cells, total_cells,
     math.floor(walkable_cells / total_cells * 100))
 
+  -- The provisional rule reported 58% of the world walkable, which was far too
+  -- generous. Water, ledges, counters and trees are all distinct values.
+  check("the walkable share is plausible",
+    walkable_cells / total_cells < 0.5,
+    ("%d%% walkable"):format(math.floor(walkable_cells / total_cells * 100)))
+
+  -- Doors are wall tiles you walk into: 544 of Crystal's warps sit on $07. So
+  -- "every warp is walkable" is false and was the wrong assertion. What must
+  -- hold is that every warp is *enterable*, which is what makes doors usable.
+  local warps_total, warps_enterable, warps_on_walls = 0, 0, 0
+  for index = 1, loaded:map_count() do
+    local map = loaded:map(index)
+    if not map.unparsed then
+      for _, warp in ipairs(map.warps or {}) do
+        warps_total = warps_total + 1
+        if loaded:can_enter(map, warp.x, warp.y) then
+          warps_enterable = warps_enterable + 1
+        end
+        if not loaded:walkable(map, warp.x, warp.y) then
+          warps_on_walls = warps_on_walls + 1
+        end
+      end
+    end
+  end
+  check_equal("every warp is enterable", warps_enterable, warps_total)
+  log("        %d warps, %d of them on tiles that are not walkable",
+    warps_total, warps_on_walls)
+
+  -- And the rule must not make everything enterable: a wall without a warp
+  -- still blocks.
+  local sample_map
+  for index = 1, loaded:map_count() do
+    local candidate = loaded:map(index)
+    if not candidate.unparsed then
+      sample_map = candidate
+      break
+    end
+  end
+
+  local blocked = 0
+  for cell_y = 0, math.min(sample_map.height * world.CELLS_PER_BLOCK, 40) - 1 do
+    for cell_x = 0, math.min(sample_map.width * world.CELLS_PER_BLOCK, 40) - 1 do
+      if not loaded:can_enter(sample_map, cell_x, cell_y) then
+        blocked = blocked + 1
+      end
+    end
+  end
+  check("walls without warps still block", blocked > 0,
+    ("%d blocked cells on the sample map"):format(blocked))
+
+  -- Grass, and that it lines up with the maps that have encounter tables.
+  local grass_maps, grass_cells, with_tables = 0, 0, 0
+  for index = 1, loaded:map_count() do
+    local map = loaded:map(index)
+    if not map.unparsed then
+      local found = 0
+      for cell_y = 0, map.height * world.CELLS_PER_BLOCK - 1 do
+        for cell_x = 0, map.width * world.CELLS_PER_BLOCK - 1 do
+          if loaded:is_grass(map, cell_x, cell_y) then
+            found = found + 1
+          end
+        end
+      end
+      if found > 0 then
+        grass_maps = grass_maps + 1
+        grass_cells = grass_cells + found
+        if map.encounters then
+          with_tables = with_tables + 1
+        end
+      end
+    end
+  end
+  log("        %d maps have grass tiles (%d cells), %d of those have an "
+    .. "encounter table", grass_maps, grass_cells, with_tables)
+
+  -- Neither implication holds, and the reasons differ.
+  --
+  -- Most encounter tables belong to maps with no grass: caves and dungeons roll
+  -- on ordinary floor, which is why the engine consults the environment as well
+  -- as the terrain. Going the other way, 25 maps have grass tiles and no table;
+  -- that is not yet explained, so it is reported rather than asserted either
+  -- way. Guessing a threshold that happens to pass would hide it.
+  local rolling = 0
+  for index = 1, loaded:map_count() do
+    local map = loaded:map(index)
+    if not map.unparsed and map.encounters then
+      rolling = rolling + 1
+    end
+  end
+  log("        %d maps have an encounter table; %d of those are caves or "
+    .. "dungeons that roll on floor", rolling, rolling - with_tables)
+  check("a fair number of maps have grass", grass_maps >= 40,
+    ("%d maps"):format(grass_maps))
+  check("maps that can roll for encounters are plentiful", rolling >= 80,
+    ("%d maps"):format(rolling))
+
   -- Off-map is blocked.
   local first
   for index = 1, loaded:map_count() do

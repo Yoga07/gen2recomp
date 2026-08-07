@@ -18,6 +18,7 @@ local HEADLESS = {
   ["--probe-maps"] = "tests.probe_maps",
   ["--probe-events"] = "tests.probe_events",
   ["--probe-collision"] = "tests.probe_collision",
+  ["--probe-collision2"] = "tests.probe_collision2",
   ["--probe-ow-sprites"] = "tests.probe_ow_sprites",
   ["--probe-text"] = "tests.probe_text",
   ["--probe-font"] = "tests.probe_font",
@@ -129,7 +130,8 @@ function love.load(args)
       state.shot = {
         path = args[i + 1],
         map_index = tonumber(args[i + 2]),
-        sign = (args[i + 2] == "sign" or args[i + 2] == "npc") and args[i + 2] or nil,
+        sign = (args[i + 2] == "sign" or args[i + 2] == "npc"
+          or args[i + 2] == "grass") and args[i + 2] or nil,
         frames = 2,
       }
     end
@@ -146,7 +148,9 @@ function love.load(args)
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
     end
-    if state.shot and state.shot.sign then
+    if state.shot and state.shot.sign == "grass" then
+      state.game:show_first_encounter()
+    elseif state.shot and state.shot.sign then
       state.game:show_first_sign(state.shot.sign)
     end
   else

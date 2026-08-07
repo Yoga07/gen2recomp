@@ -27,7 +27,8 @@ engine does not exist yet.
 | Maps: headers, dimensions, block data, connections | working, 384 maps |
 | Map events: warps, triggers, signposts, NPCs | working, all 384 maps |
 | Overworld: rendering, grid movement, warps | working |
-| Collision | provisional — see below |
+| Collision: terrain classification | working |
+| Wild encounter trigger | working — grass, and cave floor |
 | Overworld sprites: player and NPCs | working, 102 sprites |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Wild encounters, grass and water | working — 91 and 62 maps |
@@ -44,7 +45,7 @@ You can walk around. Import a cartridge, press enter, and move with the arrow
 keys or WASD; doors warp between maps, and the player and NPCs are drawn with
 the cartridge's own sprites. Press Z or space to read a signpost.
 
-143 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+148 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
