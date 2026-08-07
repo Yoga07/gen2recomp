@@ -146,6 +146,38 @@ fields fall outside the accepted ranges, not absent ones. And 384 has not been
 checked against an authoritative map count for Crystal, so treat it as "the maps
 that decode" rather than "all the maps".
 
+## Event headers, and what a bounds check is actually for
+
+Each map's attributes record points at an event header: two filler bytes, then
+four counted arrays in a fixed order — warps (5 bytes each), coordinate triggers
+(8), background events such as signposts (5), and object events, meaning NPCs
+and ground items (13).
+
+The order was never in doubt; the record sizes were. Rather than guess, every
+plausible combination was tried against all 384 maps and scored on whether warps
+and NPCs landed inside their own map's bounds. One combination parses 383 maps
+and finds 1,296 warps. The near-misses parse a similar number of maps but find
+*zero* warps — they are degenerate parses that read every count as zero and
+never desynchronise because they never advance. Counting what a layout finds,
+not just whether it survives, is what separates them.
+
+Script-pointer positions were found the same way: read every byte offset in a
+record as a 16-bit word and count how often it lands in the switchable bank
+window. The real field is valid essentially always (100% for signposts and
+triggers, 96% for objects, whose remainder is null), and every other offset is
+far below that. Warps show no such field, correctly — they have no script.
+
+Once the layout was settled the bounds check had done its job, and keeping it as
+a hard error was wrong. Object count and record size are both fixed, so a stray
+position cannot desynchronise anything, and one Crystal map really does place an
+NPC outside its own dimensions. `events.decode` now flags such objects rather
+than rejecting the map. The distinction matters generally: a test that discovers
+a format is not automatically a good invariant to enforce afterwards.
+
+Verification is visual and unambiguous. Rendering a map with warps, signposts
+and NPCs overlaid puts every warp on a door, every signpost on a sign tile, and
+every NPC on walkable ground. Coordinates read from a wrong offset scatter.
+
 ## What is not decided yet
 
 - **Map representation.** Gen 2 maps are block-based: a tileset defines 4x4-tile

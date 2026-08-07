@@ -13,6 +13,7 @@ local pics = require("src.rom.pics")
 local palettes = require("src.rom.palettes")
 local tilesets = require("src.rom.tilesets")
 local maps = require("src.rom.maps")
+local events = require("src.rom.events")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -192,7 +193,8 @@ function importer.run(path, progress)
   -- grid at runtime, and rendering 384 maps up front would cost minutes and
   -- produce images nothing reads. `--dump-maps` renders them when a human needs
   -- to look.
-  local map_summary = { count = 0, blocks = 0 }
+  local map_summary = { count = 0, blocks = 0, warps = 0, objects = 0,
+                        event_failures = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -215,7 +217,7 @@ function importer.run(path, progress)
           flat[i + 1] = rom:u8(attributes.block_data + i)
         end
 
-        records[index] = {
+        local record = {
           header_offset = header.offset,
           tileset = header.tileset,
           environment = header.environment_name,
@@ -223,11 +225,25 @@ function importer.run(path, progress)
           height = attributes.height,
           border_block = attributes.border_block,
           connections = maps.connection_list(attributes),
-          -- Kept so the script and event decoders have somewhere to start.
+          -- Kept so the script decoder has somewhere to start.
           script_offset = attributes.scripts,
           event_offset = attributes.events,
           blocks = flat,
         }
+
+        local decoded = events.decode(rom, header)
+        if decoded then
+          record.warps = decoded.warps
+          record.coord_events = decoded.coord_events
+          record.bg_events = decoded.bg_events
+          record.objects = decoded.objects
+          map_summary.warps = map_summary.warps + #decoded.warps
+          map_summary.objects = map_summary.objects + #decoded.objects
+        else
+          map_summary.event_failures = map_summary.event_failures + 1
+        end
+
+        records[index] = record
       end
 
       cache.write(descriptor.game, "maps", records)
@@ -306,6 +322,9 @@ function importer.format_report(report)
   if report.maps then
     lines[#lines + 1] = ("  %-16s %4d maps, %d blocks total")
       :format("maps", report.maps.count, report.maps.blocks)
+    lines[#lines + 1] = ("  %-16s %4d warps, %d objects, %d maps whose events failed")
+      :format("events", report.maps.warps, report.maps.objects,
+        report.maps.event_failures)
   end
 
   if next(report.failed) then

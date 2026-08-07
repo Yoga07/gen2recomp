@@ -20,6 +20,7 @@ local pics = require("src.rom.pics")
 local palettes = require("src.rom.palettes")
 local tilesets = require("src.rom.tilesets")
 local maps = require("src.rom.maps")
+local events = require("src.rom.events")
 
 local harness = {}
 
@@ -583,6 +584,97 @@ local function test_maps(rom, tileset_result)
   return result
 end
 
+--- Event headers are confirmed by position. Every warp and NPC must land
+-- inside its own map, which a parse desynchronised by a wrong record size does
+-- not manage. The record sizes themselves were established the same way.
+local function test_events(rom, map_result)
+  log("\n== map events ==")
+  if not map_result then
+    log("  SKIP  maps were not located")
+    return
+  end
+
+  local decoded_count, failures = 0, {}
+  local totals = { warps = 0, coord_events = 0, bg_events = 0, objects = 0 }
+  local bad_destinations, bad_scripts, unknown_bg = 0, 0, 0
+  local outside = 0
+
+  for _, header in ipairs(map_result.headers) do
+    local decoded, why = events.decode(rom, header)
+    if not decoded then
+      if #failures < 5 then
+        failures[#failures + 1] = ("0x%06X: %s"):format(header.offset, tostring(why))
+      end
+    else
+      decoded_count = decoded_count + 1
+      for key in pairs(totals) do
+        totals[key] = totals[key] + #decoded[key]
+      end
+
+      for _, warp in ipairs(decoded.warps) do
+        -- Crystal has 26 map groups; a destination outside that is a misread.
+        if warp.destination_group < 1 or warp.destination_group > 26 then
+          bad_destinations = bad_destinations + 1
+        end
+      end
+
+      for _, bg in ipairs(decoded.bg_events) do
+        if not bg.kind_name then
+          unknown_bg = unknown_bg + 1
+        end
+        if not bg.script then
+          bad_scripts = bad_scripts + 1
+        end
+      end
+
+      for _, object in ipairs(decoded.objects) do
+        if object.out_of_bounds then
+          outside = outside + 1
+        end
+      end
+    end
+  end
+
+  check_equal("every map's events decode", decoded_count, #map_result.headers)
+  for _, failure in ipairs(failures) do
+    log("        %s", failure)
+  end
+
+  log("        %d warps, %d triggers, %d signposts, %d objects",
+    totals.warps, totals.coord_events, totals.bg_events, totals.objects)
+
+  -- Objects sitting outside their map are legal and rare. Many of them would
+  -- mean the record size is wrong.
+  check("almost no objects sit outside their map", outside <= 2,
+    ("%d of %d are out of bounds"):format(outside, totals.objects))
+  log("        %d objects sit outside their map's own dimensions", outside)
+
+  -- A map with no warps at all would be unreachable, and Crystal is mostly
+  -- interiors, so warps should outnumber maps.
+  check("warps outnumber maps", totals.warps > #map_result.headers,
+    ("%d warps for %d maps"):format(totals.warps, #map_result.headers))
+
+  check_equal("every warp targets a real map group", bad_destinations, 0)
+  check_equal("every signpost type is known", unknown_bg, 0)
+  check_equal("every signpost has a script pointer", bad_scripts, 0)
+
+  -- Objects carry scripts too, though some are null.
+  local with_script, object_total = 0, 0
+  for _, header in ipairs(map_result.headers) do
+    local decoded = events.decode(rom, header)
+    if decoded then
+      for _, object in ipairs(decoded.objects) do
+        object_total = object_total + 1
+        if object.script then
+          with_script = with_script + 1
+        end
+      end
+    end
+  end
+  check("most objects carry a script pointer", with_script > object_total * 0.9,
+    ("%d of %d"):format(with_script, object_total))
+end
+
 --------------------------------------------------------------------------------
 
 function harness.run(rom_path, report_path)
@@ -606,7 +698,8 @@ function harness.run(rom_path, report_path)
     test_sprites(rom, found and found.base_stats)
     test_palettes(rom, found and found.species_names and found.species_names.records)
     local tileset_result = test_tilesets(rom)
-    test_maps(rom, tileset_result)
+    local map_result = test_maps(rom, tileset_result)
+    test_events(rom, map_result)
     rom:release()
   end
 

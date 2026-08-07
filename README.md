@@ -25,13 +25,14 @@ engine does not exist yet.
 | Sprite palettes, normal and shiny | working |
 | Tilesets: graphics, blocks, collision | working, 31 tilesets |
 | Maps: headers, dimensions, block data, connections | working, 384 maps |
+| Map events: warps, triggers, signposts, NPCs | working, all 384 maps |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
-| Map scripts and events | pointers extracted, not decoded |
+| Map scripts | pointers extracted, bytecode not decoded |
 | Text banks | not started |
 | Audio | not started |
 | Engine (overworld, battle, menus) | not started |
 
-88 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+95 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

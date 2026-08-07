@@ -11,6 +11,31 @@
 local Rom = require("src.rom.rom")
 local tilesets = require("src.rom.tilesets")
 local maps = require("src.rom.maps")
+local events = require("src.rom.events")
+
+-- A movement tile is half a block on each edge, so 16 pixels in the render.
+local TILE_PIXELS = maps.BLOCK_PIXELS / events.TILES_PER_BLOCK
+
+--- Draw a hollow box one movement tile in size, so the map stays readable
+-- underneath it. Positions are in movement tiles.
+local function mark(image, x, y, r, g, b)
+  local width, height = image:getDimensions()
+  local left, top = x * TILE_PIXELS, y * TILE_PIXELS
+
+  for i = 0, TILE_PIXELS - 1 do
+    for _, point in ipairs {
+      { left + i, top },
+      { left + i, top + TILE_PIXELS - 1 },
+      { left, top + i },
+      { left + TILE_PIXELS - 1, top + i },
+    } do
+      local px, py = point[1], point[2]
+      if px >= 0 and px < width and py >= 0 and py < height then
+        image:setPixel(px, py, r, g, b, 1)
+      end
+    end
+  end
+end
 
 local dump = {}
 
@@ -99,6 +124,28 @@ function dump.run(rom_path, report_path)
 
     if tileset then
       local image = maps.render(rom, header, tileset.tiles, tileset.blocks)
+
+      -- Overlay the events. This is the check that matters: warps should sit on
+      -- doors and cave mouths, NPCs on walkable ground. Coordinates decoded
+      -- from the wrong offset would scatter.
+      local decoded, event_err = events.decode(rom, header)
+      if not decoded then
+        log("      events failed: %s", tostring(event_err))
+      else
+        log("      %d warps, %d triggers, %d signposts, %d objects",
+          #decoded.warps, #decoded.coord_events, #decoded.bg_events,
+          #decoded.objects)
+        for _, warp in ipairs(decoded.warps) do
+          mark(image, warp.x, warp.y, 1, 0.2, 0.2)
+        end
+        for _, bg in ipairs(decoded.bg_events) do
+          mark(image, bg.x, bg.y, 1, 1, 0.2)
+        end
+        for _, object in ipairs(decoded.objects) do
+          mark(image, object.x, object.y, 0.2, 0.5, 1)
+        end
+      end
+
       local encoded = image:encode("png")
       local path = ("dump/maps/%02d_%dx%d_ts%02d.png")
         :format(i, attributes.width, attributes.height, header.tileset)
