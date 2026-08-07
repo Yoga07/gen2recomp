@@ -262,18 +262,56 @@ That trick generalises. When two structures are known and the mapping between
 them is not, the mapping is often recoverable by looking at what sits next to
 the known values.
 
+### Choosing opcodes against a measured noise floor
+
+A second text opcode was added by measuring rather than guessing. For every
+opcode that commonly opens a script, count what fraction of its two-byte
+operands decode as dialogue:
+
+| opcode | decodes as text | |
+| --- | --- | --- |
+| `$53` | 215 of 289 | 74% |
+| `$51` | 144 of 351 | 41% |
+| `$6B` | 40 of 316 | 13% |
+| `$47` | 8 of 96 | 8% |
+| `$0C` | 1 of 152 | 0.7% |
+
+`$0C` is the control. Its operands are plainly not addresses — they are small
+ids — so its 0.7% is simply how often arbitrary bytes happen to decode as
+dialogue. Having that baseline is what makes the rest interpretable: `$53` and
+`$51` are unambiguous, and adding `$51` took coverage from 175 scripts to 377.
+
+`$6B` and `$47` were left out. Thirteen percent is well clear of the noise
+floor and they may take a text pointer in some form, but at that rate a
+meaningful share of what they produced would be wrong, and dialogue attributed
+to the wrong character is worse than no dialogue.
+
+Names in the opcode table are descriptive, not authoritative. `$53` shows a
+message and ends the script; `$51`'s semantics beyond "its operand is a text
+pointer" are unknown, so it is called `showtext_51` rather than given a name it
+might not deserve.
+
+### Substitution codes
+
+Dialogue embeds codes the text engine replaces at display time — `<PLAYER>`,
+`<RIVAL>`, `POKé`, `TRAINER` and others — sharing the range with the layout
+controls. A decoder that does not know them rejects any line containing one,
+which is most of the interesting dialogue in the game: adding them took `$53`'s
+hit rate from 159 of 289 to 215.
+
 ### What is honestly not done
 
-175 of 2,200 scripts. Signposts are mostly a single instruction and mostly
-work; NPC scripts branch, check flags, give items and move people around, and
-none of that is interpreted. The decoder deliberately reads only the first
-instruction and returns nothing rather than guessing when it sees anything else,
-so the 175 are trustworthy and the rest are visibly absent instead of quietly
-wrong.
+377 of 2,200. Signposts are mostly a single instruction and mostly work; NPC
+scripts branch, check flags, give items and move people around, and none of that
+is interpreted. The decoder reads only the first instruction and returns nothing
+rather than guessing, so what it produces is trustworthy and the rest is visibly
+absent instead of quietly wrong.
 
-The `$4C` writetext opcode is recognised but never fires, because it appears
-mid-script rather than as the opening instruction. It stays in the table as a
-marker of where the next work starts.
+`$91` is `end`, identified by sitting immediately before the next script 607
+times, and `$4C` is recognised but never fires because it appears mid-script.
+Both are recorded as the starting points for a real walker: with script extents
+recoverable from the gaps between consecutive entry points, operand widths can
+be inferred by requiring a walk to consume its extent exactly.
 
 ## The font, and the one hardcoded offset
 

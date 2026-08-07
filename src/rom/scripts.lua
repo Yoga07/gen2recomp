@@ -18,16 +18,43 @@ local text = require("src.rom.text")
 
 local scripts = {}
 
--- Show a text block and end the script. The overwhelming majority of signposts
--- are exactly this one instruction.
+-- Opcodes whose two-byte operand is a text pointer.
+--
+-- Which these are was settled statistically rather than from a specification.
+-- Across every script in the game, the fraction of each opcode's operands that
+-- decode as dialogue is:
+--
+--   $53  215 of 289   74%
+--   $51  144 of 351   41%
+--   $6B   40 of 316   13%
+--   $47    8 of  96    8%
+--   $0C    1 of 152   0.7%
+--
+-- $0C sets the baseline. Its operand is plainly not an address — the values are
+-- small ids — so its 0.7% is how often arbitrary bytes happen to decode as
+-- dialogue. Against that, $53 and $51 are unambiguous.
+--
+-- $6B and $47 are left out. Thirteen percent is well above the noise floor and
+-- they may well take a text pointer in some forms, but at that rate a
+-- meaningful share of what they produced would be wrong, and wrong dialogue
+-- attributed to the wrong character is worse than absent dialogue.
+--
+-- Names are descriptive, not authoritative. $53 shows a message and ends the
+-- script, which is what a signpost does. $51's exact semantics are unknown
+-- beyond that its operand is a text pointer.
 scripts.JUMPTEXT = 0x53
--- Also takes a text pointer. Used where the script continues afterwards.
+scripts.SHOWTEXT_51 = 0x51
 scripts.WRITETEXT = 0x4C
 
 scripts.text_opcodes = {
   [scripts.JUMPTEXT] = "jumptext",
+  [scripts.SHOWTEXT_51] = "showtext_51",
   [scripts.WRITETEXT] = "writetext",
 }
+
+-- Ends a script. Identified by being the byte immediately before the next
+-- script begins, 607 times across the game.
+scripts.END = 0x91
 
 --- Resolve a near pointer against a bank.
 local function resolve(bank, addr, rom)

@@ -115,15 +115,22 @@ end
 -- Used by the screenshot mode to check the whole path from cartridge to
 -- text box without a human at the keyboard.
 -- @return true when it found one
-function game:show_first_sign()
+-- @param kind "sign" for a background event, "npc" for a person
+function game:show_first_sign(kind)
+  local want_pages = kind == "npc" and 2 or 1
+
   for index = 1, self.world:map_count() do
     local map = self.world:map(index)
     if not map.unparsed then
-      for _, bg in ipairs(map.bg_events or {}) do
-        if bg.text and #bg.text > 0 then
-          self:enter(index, bg.x, bg.y + 1, "up")
-          -- Standing below it, facing up, is how a sign is read.
-          self.dialogue = { pages = bg.text, page = 1 }
+      local group = kind == "npc" and (map.objects or {}) or (map.bg_events or {})
+      for _, item in ipairs(group) do
+        -- For an NPC, prefer someone with a real conversation rather than a
+        -- one-line remark.
+        if item.text and #item.text >= want_pages then
+          self:enter(index, item.x, item.y + 1, "up")
+          -- Standing below it, facing up, is how you read a sign or speak to
+          -- someone.
+          self.dialogue = { pages = item.text, page = 1 }
           return true
         end
       end

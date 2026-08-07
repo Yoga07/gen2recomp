@@ -32,7 +32,7 @@ engine does not exist yet.
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Dialogue text and charmap | working |
 | Font | working — the one hardcoded offset, see docs |
-| Map scripts | text-only: 175 of 2200 read |
+| Map scripts | text-only: 377 of 2200 read |
 | Script bytecode beyond text | not started |
 | Battles, menus, audio | not started |
 | Audio | not started |

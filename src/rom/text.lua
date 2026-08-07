@@ -89,6 +89,25 @@ text.CONTINUE = 0x55  -- scroll and carry on
 text.DONE = 0x57      -- end of the block
 text.PROMPT = 0x58    -- wait for the player, then end
 
+-- Codes the text engine replaces with something at display time: names the
+-- player chose, and a few words that are one glyph in the font or too long to
+-- store repeatedly. They sit in the same range as the layout controls, so a
+-- decoder that does not know them rejects any line containing one — which is
+-- most of the interesting dialogue in the game.
+text.substitutions = {
+  [0x4A] = "PKMN",
+  [0x52] = "<PLAYER>",
+  [0x53] = "<RIVAL>",
+  [0x54] = "POKé",
+  [0x56] = "……",
+  [0x59] = "<TARGET>",
+  [0x5A] = "<USER>",
+  [0x5B] = "PC",
+  [0x5C] = "TM",
+  [0x5D] = "TRAINER",
+  [0x5E] = "ROCKET",
+}
+
 text.controls = {
   [text.START] = "start",
   [text.LINE] = "line",
@@ -155,12 +174,27 @@ function text.decode_dialogue(data, offset, max_bytes)
       end
       return { pages = pages, bytes = i + 1, prompted = prompted }
     else
-      local glyph = charmap[code]
+      local glyph = charmap[code] or text.substitutions[code]
       if not glyph then
         return nil
       end
       current[#current + 1] = glyph
-      current_codes[#current_codes + 1] = code
+      -- Substitutions have no single glyph to draw, so their codes are spelled
+      -- out as the characters of the placeholder. The engine draws what it is
+      -- given; resolving these to real names is the save file's job.
+      if charmap[code] then
+        current_codes[#current_codes + 1] = code
+      else
+        for i = 1, #glyph do
+          local letter = glyph:sub(i, i):upper()
+          local byte_value = letter:byte()
+          if letter >= "A" and letter <= "Z" then
+            current_codes[#current_codes + 1] = 0x80 + byte_value - 65
+          elseif letter == " " then
+            current_codes[#current_codes + 1] = 0x7F
+          end
+        end
+      end
       letters = letters + 1
     end
   end

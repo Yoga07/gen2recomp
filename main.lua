@@ -21,6 +21,7 @@ local HEADLESS = {
   ["--probe-ow-sprites"] = "tests.probe_ow_sprites",
   ["--probe-text"] = "tests.probe_text",
   ["--probe-font"] = "tests.probe_font",
+  ["--probe-scripts"] = "tests.probe_scripts",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }
@@ -126,7 +127,7 @@ function love.load(args)
       state.shot = {
         path = args[i + 1],
         map_index = tonumber(args[i + 2]),
-        sign = args[i + 2] == "sign",
+        sign = (args[i + 2] == "sign" or args[i + 2] == "npc") and args[i + 2] or nil,
         frames = 2,
       }
     end
@@ -144,7 +145,7 @@ function love.load(args)
       return
     end
     if state.shot and state.shot.sign then
-      state.game:show_first_sign()
+      state.game:show_first_sign(state.shot.sign)
     end
   else
     show_idle()
