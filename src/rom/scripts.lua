@@ -155,6 +155,51 @@ function scripts.read_text(rom, bank, addr)
   return { blocks = blocks, status = status }
 end
 
+--- Walk a script looking for one particular command.
+--
+-- The same linear walk `read_text` uses, and it stops in the same places for
+-- the same reasons: a terminator, an unknown opcode, or a branch. A command
+-- behind a conditional is not reached, which is why this finds most of the
+-- shops in Crystal rather than all of them.
+--
+-- @return the offset of the command's first argument byte, or nil
+function scripts.find_opcode(rom, bank, addr, wanted)
+  local at = resolve(bank, addr, rom)
+  if not at then
+    return nil
+  end
+
+  local widths, terminators, names = script_ops.widths()
+
+  for _ = 1, scripts.MAX_INSTRUCTIONS do
+    if at + 1 > rom.size then
+      return nil
+    end
+
+    local opcode = rom:u8(at)
+    local width = widths[opcode]
+    if width == nil then
+      return nil
+    end
+    if opcode == wanted then
+      return at + 1
+    end
+
+    at = at + 1 + width
+
+    if terminators[opcode] then
+      return nil
+    end
+    local name = names[opcode]
+    if name and (name:sub(1, 2) == "if" or name == "scall"
+      or name == "farscall") then
+      return nil
+    end
+  end
+
+  return nil
+end
+
 --- Read the text for every signpost and NPC on a map.
 --
 -- @param header a decoded map header

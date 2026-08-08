@@ -1752,6 +1752,137 @@ local function test_items(attributes, names)
   check_equal("and does not invent any", restored:total(), held:total())
 end
 
+-- Mart inventories.
+local function test_marts(rom, names, attributes, map_result)
+  log("\n== marts ==")
+  if not names or not attributes then
+    log("  SKIP  the item tables were not located")
+    return
+  end
+
+  local marts = require("src.rom.marts")
+
+  local result, why = marts.locate(rom, names, attributes)
+  if not check("the mart table was located", result ~= nil, why) then
+    return
+  end
+
+  log("        %d marts, table at 0x%06X", result.count, result.offset)
+  check("Crystal has a few dozen shops", result.count >= 20
+    and result.count <= 60, ("%d"):format(result.count))
+
+  -- The structural claim the locator rests on, asserted rather than assumed:
+  -- the table of pointers ends exactly where the first list it points at
+  -- begins. Noise does not produce that.
+  local first = math.huge
+  for _, offset in ipairs(result.offsets) do
+    first = math.min(first, offset)
+  end
+  check_equal("the pointer table ends where its data begins",
+    result.offset + result.count * 2, first)
+
+  -- The shape alone identifies nothing, which is the point of the above.
+  local sellable = marts.sellable_predicate(names, attributes)
+  local coincidences = 0
+  for offset = 0, rom.size - 2 do
+    if marts.decode(rom, offset, sellable) then
+      coincidences = coincidences + 1
+    end
+  end
+  log("        %d offsets in the ROM read as a mart list", coincidences)
+  check("the list shape on its own is not distinctive",
+    coincidences > result.count * 2, ("%d"):format(coincidences))
+
+  -- Every list decoded, and every item in it is something a shop could sell.
+  local decoded, stocked, placeholder = 0, {}, 0
+  for _, list in ipairs(result.lists) do
+    if list then
+      decoded = decoded + 1
+      for _, item in ipairs(list) do
+        stocked[names[item] or "?"] = true
+        if names[item] == "TERU-SAMA" then
+          placeholder = placeholder + 1
+        end
+      end
+    end
+  end
+  check_equal("every pointer resolves to a list", decoded, result.count)
+  check_equal("no shop stocks an unused slot", placeholder, 0)
+
+  -- The first mart is Cherrygrove's, which sells exactly these four. That is
+  -- known independently of this code, which is what makes it a check rather
+  -- than a restatement.
+  local first_list = {}
+  for _, item in ipairs(result.lists[1]) do
+    first_list[#first_list + 1] = names[item]
+  end
+  check_equal("the first mart is Cherrygrove's stock",
+    table.concat(first_list, ", "), "POTION, ANTIDOTE, PARLYZ HEAL, AWAKENING")
+
+  -- The department store floors are the interesting ones: a shop that sells
+  -- nothing but machines, and one that sells nothing but vitamins.
+  local machine_shops, vitamin_shops = 0, 0
+  for _, list in ipairs(result.lists) do
+    local all_machines, all_vitamins = true, true
+    for _, item in ipairs(list) do
+      if attributes[item].pocket ~= "machines" then
+        all_machines = false
+      end
+      -- The vitamins are the five that raise a stat permanently.
+      local name = names[item]
+      if name ~= "HP UP" and name ~= "PROTEIN" and name ~= "IRON"
+        and name ~= "CARBOS" and name ~= "CALCIUM" then
+        all_vitamins = false
+      end
+    end
+    if all_machines then machine_shops = machine_shops + 1 end
+    if all_vitamins then vitamin_shops = vitamin_shops + 1 end
+  end
+  check("some shops sell only machines", machine_shops >= 4,
+    ("%d"):format(machine_shops))
+  check("some shops sell only vitamins", vitamin_shops >= 2,
+    ("%d"):format(vitamin_shops))
+
+  check("the shops between them stock plenty", stocked["POKé BALL"] == true
+    and stocked["ULTRA BALL"] == true and stocked["FULL RESTORE"] == true)
+
+  -- Which shopkeeper opens which shop, found by walking their script for the
+  -- pokemart command. The walk stops at branches, so this reaches most of the
+  -- shops rather than all of them, and the count is asserted as a floor.
+  if not map_result then
+    log("  SKIP  maps were not located, so shopkeepers were not looked for")
+    return
+  end
+
+  local found_marts, shopkeepers = {}, 0
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local bank = math.floor(header.attributes.scripts / 0x4000)
+      for _, object in ipairs(decoded.objects) do
+        if object.kind == events.OBJECT_SCRIPT and object.script then
+          local index = marts.for_script(rom, scripts, bank, object.script,
+            result.count)
+          if index then
+            shopkeepers = shopkeepers + 1
+            found_marts[index] = (found_marts[index] or 0) + 1
+          end
+        end
+      end
+    end
+  end
+
+  local distinct = 0
+  for _ in pairs(found_marts) do distinct = distinct + 1 end
+  log("        %d shopkeepers open %d distinct shops", shopkeepers, distinct)
+  check("most shops have a shopkeeper who opens them", shopkeepers >= 20,
+    ("%d of %d"):format(shopkeepers, result.count))
+  -- A shopkeeper standing for two different shops would mean the index is
+  -- being read from the wrong place.
+  check("each shopkeeper opens one shop", distinct >= shopkeepers - 2,
+    ("%d shopkeepers, %d shops"):format(shopkeepers, distinct))
+end
+
 -- The menu widget: cursor, wrapping, and the scroll window.
 local function test_menu()
   log("\n== menus ==")
@@ -2410,6 +2541,10 @@ function harness.run(rom_path, report_path)
     test_menu()
     test_items(found and found.item_attributes and found.item_attributes.records,
       found and found.item_names and found.item_names.records)
+    test_marts(rom,
+      found and found.item_names and found.item_names.records,
+      found and found.item_attributes and found.item_attributes.records,
+      map_result)
     test_item_balls(rom, map_result,
       found and found.item_names and found.item_names.records)
     test_trainer_objects(rom, map_result,

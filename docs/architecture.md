@@ -731,10 +731,44 @@ construction and does not rest on the flags being distinct, which has not been
 checked. A taken ball stops being drawn and stops being interactive, and the
 set of taken balls is saved with the game.
 
+## Marts
+
+A mart list is a count, that many item ids, then `$FF`. That shape is far too
+common to search for: **320 offsets in Crystal read as a mart list**, and all but
+34 of them are coincidence. Finding one proves nothing.
+
+Three things together identify the real table. The lists sit back to back in one
+block. A run of near pointers lands on those lists and on nothing else. And the
+part that settles it — **the pointer table ends at exactly the offset of the first
+list it points at**. A table of 34 pointers whose own end is the first thing it
+points at is not something noise produces. The tests assert that equality
+directly rather than trusting the search that found it.
+
+The contents confirm themselves. Mart 1 is Cherrygrove's four — Potion, Antidote,
+Parlyz Heal, Awakening — which is known independently of this code. Marts 10 to
+13 are the same three TMs with one or two more added, which is the Goldenrod
+department store's machine floor changing as the story moves on. One shop sells
+nothing but the five vitamins, another nothing but the X items, and one sells
+TinyMushroom and SlowpokeTail, which is Team Rocket's sale in Azalea.
+
+### Which shop belongs to whom
+
+A shopkeeper is an ordinary script object; what marks them out is a `pokemart`
+command in the script they run. The opcode table gives `$94` three argument
+bytes, and walking every map script says how they are laid out: the first byte
+is 0 in 27 of the 29 reachable cases, and the word after it is different almost
+every time. A dialogue variant repeats; an index does not. Reading that word as
+a 0-based mart index resolves 27 shopkeepers onto 26 distinct shops.
+
+That is 27 of 34, not all of them, and the reason is the same one that limits
+the dialogue walk: it stops at conditionals. A shop opened from behind an `if`
+is not reached. The tests assert the count as a floor.
+
 ### What is not there yet
 
-The scripts that hand out items are not interpreted, so the starting bag is a
-stand-in written in the engine rather than something the cartridge granted. The
-mart inventories have not been located, and the hidden items — the ones found
-with the Itemfinder rather than seen on the ground — are a different structure
-that has not been looked at.
+The scripts that hand out items and set your money are not interpreted, so the
+starting bag and the starting ¥3000 are stand-ins written in the engine rather
+than something the cartridge granted. Selling is not implemented, only buying,
+and buying is one at a time rather than by quantity. The hidden items — the ones
+found with the Itemfinder rather than seen on the ground — are a different
+structure that has not been looked at.

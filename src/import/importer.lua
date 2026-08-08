@@ -19,6 +19,7 @@ local scripts = require("src.rom.scripts")
 local font = require("src.rom.font")
 local encounters = require("src.rom.encounters")
 local trainers = require("src.rom.trainers")
+local marts = require("src.rom.marts")
 local learnsets = require("src.rom.learnsets")
 local cache = require("src.import.cache")
 
@@ -287,6 +288,21 @@ function importer.run(path, progress)
     cache.write(descriptor.game, "trainers", records)
   end
 
+  -- Mart inventories, which need the item tables to know what can be stocked.
+  local mart_summary = { count = 0 }
+  if found.item_names and found.item_attributes then
+    step("locating marts")
+    local mart_result, mart_err = marts.locate(rom,
+      found.item_names.records, found.item_attributes.records)
+    if not mart_result then
+      failed.marts = mart_err
+    else
+      offsets.marts = mart_result.offset
+      mart_summary.count = mart_result.count
+      cache.write(descriptor.game, "marts", mart_result.lists)
+    end
+  end
+
   -- The font, so the engine can draw text in the cartridge's own letters.
   step("locating the font")
   local font_result, font_err = font.locate(rom, descriptor.game)
@@ -339,7 +355,8 @@ function importer.run(path, progress)
   -- to look.
   local map_summary = { count = 0, blocks = 0, warps = 0, objects = 0,
                         event_failures = 0, scripts = 0, scripts_read = 0,
-                        with_encounters = 0, trainers = 0, items = 0 }
+                        with_encounters = 0, trainers = 0, items = 0,
+                        shopkeepers = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -421,6 +438,16 @@ function importer.run(path, progress)
               if trainer then
                 record.objects[index].trainer = trainer
                 map_summary.trainers = map_summary.trainers + 1
+              end
+            elseif object.kind == events.OBJECT_SCRIPT and object.script
+              and mart_summary.count > 0 then
+              -- A shopkeeper is an ordinary script object; what marks them out
+              -- is a pokemart command in the script they run.
+              local mart = marts.for_script(rom, scripts, script_bank,
+                object.script, mart_summary.count)
+              if mart then
+                record.objects[index].mart = mart
+                map_summary.shopkeepers = map_summary.shopkeepers + 1
               end
             elseif object.kind == events.OBJECT_ITEM and object.script then
               -- An item ball points at two bytes, not at bytecode.
@@ -544,6 +571,7 @@ function importer.run(path, progress)
     maps = map_summary,
     ow_sprites = ow_summary,
     battle_data = battle_summary,
+    marts = mart_summary,
     sha1 = sha1,
   }
 end
@@ -606,6 +634,11 @@ function importer.format_report(report)
       :format("trainers", report.maps.trainers)
     lines[#lines + 1] = ("  %-16s %4d item balls on the ground")
       :format("items", report.maps.items)
+  end
+
+  if report.marts and report.marts.count > 0 then
+    lines[#lines + 1] = ("  %-16s %4d shop inventories, %d shopkeepers found")
+      :format("marts", report.marts.count, report.maps.shopkeepers or 0)
   end
 
   if next(report.failed) then

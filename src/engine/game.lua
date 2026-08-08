@@ -66,7 +66,11 @@ function game.new(game_id, start_index)
   instance.trainer_classes = cache.read(game_id, "trainer_classes")
   instance.item_records = cache.read(game_id, "item_attributes")
   instance.item_names = cache.read(game_id, "item_names")
+  instance.marts = cache.read(game_id, "marts") or {}
   instance.bag = bag.new(instance.item_records, instance.item_names)
+  -- What the games start you with. Like the starting bag, this is ours rather
+  -- than the cartridge's: the script that sets it is not interpreted.
+  instance.money = 3000
   -- Trainers already beaten, keyed by their event flag. Saved with the game.
   instance.beaten = {}
   -- Item balls already picked up, keyed by map and object index.
@@ -104,6 +108,7 @@ function game:save()
     beaten = self.beaten,
     taken = self.taken,
     bag = self.bag:to_list(),
+    money = self.money,
   })
 
   if ok then
@@ -136,6 +141,7 @@ function game:restore()
   self.party = state.party
   self.beaten = state.beaten or {}
   self.taken = state.taken or {}
+  self.money = state.money or self.money
   -- A save written before the bag existed has no list, and the starting items
   -- set up in game.new stand rather than the bag coming back empty.
   if state.bag then
@@ -245,6 +251,28 @@ function game:show_trainer_demo()
           and self.trainer_classes[object.trainer.class] then
           self:enter(index, object.x, object.y + 1, "up")
           if self:start_trainer_battle(object.trainer) then
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
+--- Stand in front of the first shopkeeper found and open their counter.
+-- @param buy when true, buy whatever the cursor lands on first
+function game:show_mart_demo(buy)
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, object in ipairs(map.objects or {}) do
+        if object.mart then
+          self:enter(index, object.x, object.y + 1, "up")
+          if self:open_mart(object.mart) then
+            if buy then
+              self:menu_confirm()
+            end
             return true
           end
         end
@@ -562,6 +590,14 @@ function game:menu_confirm()
     return
   end
 
+  if kind == "mart" then
+    local entry = self.ui.stock[self.ui.list.cursor]
+    if entry then
+      self:buy_item(entry)
+    end
+    return
+  end
+
   if kind == "start" then
     local choice = self.ui.list:selected()
     if choice == "POKEMON" then
@@ -660,7 +696,7 @@ function game:draw_menu()
   local rows = self.ui.list:window()
   -- Party rows and item rows both carry a name and a number, so they need the
   -- full width; the short menus sit in the corner the way the games put them.
-  local wide = kind == "party" or kind == "pocket"
+  local wide = kind == "party" or kind == "pocket" or kind == "mart"
   -- "KEY ITEMS" plus its count does not fit the 76 the short menus use, and a
   -- clipped label is worse than a wider box.
   local width = wide and game.SCREEN_WIDTH or (kind == "bag" and 112 or 76)
@@ -685,6 +721,19 @@ function game:draw_menu()
       love.graphics.setColor(0.1, 0.1, 0.1)
       love.graphics.rectangle("fill", x + 6, y + 2, 5, 5)
     end
+  end
+
+  -- A shop counter shows what you have to spend, the way the games do.
+  if kind == "mart" then
+    local label = ("MONEY ¥%d"):format(self.money)
+    local box_width, box_height = 104, 22
+    local box_y = game.SCREEN_HEIGHT - box_height
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", 0, box_y, box_width, box_height)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", 2.5, box_y + 2.5,
+      box_width - 5, box_height - 5)
+    font:draw_codes(self:encode(label), 8, box_y + 7)
   end
 
   love.graphics.setColor(1, 1, 1)
@@ -748,6 +797,62 @@ function game:facing_item()
     end
   end
   return nil
+end
+
+--- The shopkeeper the player is facing, if there is one.
+-- @return the mart index
+function game:facing_mart()
+  local delta = FACING_DELTA[self.player.facing]
+  local x = self.player.cell_x + delta[1]
+  local y = self.player.cell_y + delta[2]
+
+  for _, object in ipairs(self.map.objects or {}) do
+    if object.x == x and object.y == y and object.mart then
+      return object.mart
+    end
+  end
+  return nil
+end
+
+--- Open a shop's counter.
+function game:open_mart(index)
+  local list = self.marts[index]
+  if not list then
+    return false
+  end
+
+  local labels, stock = {}, {}
+  for position, item in ipairs(list) do
+    local record = self.item_records and self.item_records[item]
+    local name = self.item_names and self.item_names[item] or ("item " .. item)
+    local price = record and record.price or 0
+    stock[position] = { item = item, name = name, price = price }
+    -- Right-aligned prices would need a width the font does not expose, so the
+    -- name is padded instead.
+    labels[position] = ("%-13s¥%d"):format(name:sub(1, 13), price)
+  end
+
+  self.ui = { kind = "mart", mart = index, stock = stock,
+              list = menu.new(labels, 6) }
+  return true
+end
+
+--- Buy one of whatever the cursor is on.
+function game:buy_item(entry)
+  if self.money < entry.price then
+    self:say({ "You don't have", "enough money." })
+    return false
+  end
+
+  local taken = self.bag:add(entry.item, 1)
+  if taken < 1 then
+    self:say({ ("You can't carry any"), ("more %s."):format(entry.name) })
+    return false
+  end
+
+  self.money = self.money - entry.price
+  self:notify(("Bought %s. ¥%d left."):format(entry.name, self.money))
+  return true
 end
 
 --- Pick up an item ball.
@@ -881,6 +986,12 @@ function game:interact()
   local block, key = self:facing_item()
   if block then
     self:take_item(block, key)
+    return
+  end
+
+  -- A shopkeeper opens their counter rather than just saying their line.
+  local mart = self:facing_mart()
+  if mart and self:open_mart(mart) then
     return
   end
 
@@ -1134,6 +1245,13 @@ function game:encode(str)
     -- what settled where the accent actually lives.
     if byte_value == 0xC3 and str:byte(i + 1) == 0xA9 then
       codes[#codes + 1] = 0xEA
+      i = i + 2
+      goto continue
+    end
+
+    -- "¥" is likewise two bytes in UTF-8, and prices are written with it.
+    if byte_value == 0xC2 and str:byte(i + 1) == 0xA5 then
+      codes[#codes + 1] = 0xF0
       i = i + 2
       goto continue
     end

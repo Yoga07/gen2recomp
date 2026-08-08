@@ -116,6 +116,7 @@ function save.write(game, state)
       table.sort(keys)
       return keys
     end)(),
+    money = state.money,
     saved_at = os.time(),
   }
 
@@ -180,6 +181,7 @@ function save.read(game, base_stats)
       return keys
     end)(),
     bag = record.bag,
+    money = record.money,
     saved_at = record.saved_at,
   }
 end

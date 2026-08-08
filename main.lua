@@ -30,6 +30,7 @@ local HEADLESS = {
   ["--probe-party-validator"] = "tests.probe_party_validator",
   ["--probe-items"] = "tests.probe_items",
   ["--probe-itemballs"] = "tests.probe_itemballs",
+  ["--probe-marts"] = "tests.probe_marts",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }
@@ -141,7 +142,8 @@ function love.load(args)
           or args[i + 2] == "menu" or args[i + 2] == "connection"
           or args[i + 2] == "trainer" or args[i + 2] == "bag"
           or args[i + 2] == "pocket" or args[i + 2] == "balls"
-          or args[i + 2] == "item" or args[i + 2] == "itemgone")
+          or args[i + 2] == "item" or args[i + 2] == "itemgone"
+          or args[i + 2] == "mart" or args[i + 2] == "buy")
           and args[i + 2] or nil,
         frames = 2,
       }
@@ -159,7 +161,10 @@ function love.load(args)
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
     end
-    if state.shot and (state.shot.sign == "item"
+    if state.shot and (state.shot.sign == "mart"
+      or state.shot.sign == "buy") then
+      state.game:show_mart_demo(state.shot.sign == "buy")
+    elseif state.shot and (state.shot.sign == "item"
       or state.shot.sign == "itemgone") then
       state.game:show_item_demo(state.shot.sign == "itemgone")
     elseif state.shot and state.shot.sign == "balls" then
