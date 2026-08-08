@@ -256,6 +256,34 @@ function importer.run(path, progress)
     end
     battle_summary.trainers = #records
     offsets.trainers = trainer_runs[1].offset
+
+    -- Class boundaries, so a trainer's (class, id) can reach its party.
+    local groups, group_err = trainers.locate_groups(rom, records)
+    if not groups then
+      failed.trainer_classes = group_err
+    else
+      offsets.trainer_classes = groups.offset
+      local by_class = {}
+      for class, start in pairs(groups.classes) do
+        local list = {}
+        local at = start
+        -- Walk the class until an entry stops decoding or the next class
+        -- begins, whichever comes first.
+        local limit = groups.classes[class + 1]
+        while at < (limit or rom.size) do
+          local record, consumed = trainers.decode(rom, at)
+          if not record then
+            break
+          end
+          list[#list + 1] = record
+          at = at + consumed
+        end
+        by_class[class] = list
+        battle_summary.classes = (battle_summary.classes or 0) + 1
+      end
+      cache.write(descriptor.game, "trainer_classes", by_class)
+    end
+
     cache.write(descriptor.game, "trainers", records)
   end
 
@@ -311,7 +339,7 @@ function importer.run(path, progress)
   -- to look.
   local map_summary = { count = 0, blocks = 0, warps = 0, objects = 0,
                         event_failures = 0, scripts = 0, scripts_read = 0,
-                        with_encounters = 0 }
+                        with_encounters = 0, trainers = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -382,6 +410,19 @@ function importer.run(path, progress)
               end
             end
             return pages
+          end
+
+          -- Trainers: an object of type 2 points at a trainer block rather
+          -- than at bytecode.
+          local script_bank = math.floor(attributes.scripts / 0x4000)
+          for index, object in ipairs(record.objects or {}) do
+            if object.kind == events.OBJECT_TRAINER and object.script then
+              local trainer = events.decode_trainer(rom, script_bank, object.script)
+              if trainer then
+                record.objects[index].trainer = trainer
+                map_summary.trainers = map_summary.trainers + 1
+              end
+            end
           end
 
           for index, found in pairs(said.bg) do
@@ -554,6 +595,8 @@ function importer.format_report(report)
       :format("scripts", report.maps.scripts_read, report.maps.scripts)
     lines[#lines + 1] = ("  %-16s %4d maps carry wild encounters")
       :format("encounters", report.maps.with_encounters)
+    lines[#lines + 1] = ("  %-16s %4d trainer objects on maps")
+      :format("trainers", report.maps.trainers)
   end
 
   if next(report.failed) then

@@ -1691,6 +1691,149 @@ local function test_menu()
   check_equal("exactly one row is selected", marked, 1)
 end
 
+--- Trainers on maps, and the class table that reaches their parties.
+local function test_trainer_objects(rom, map_result, species_names)
+  log("\n== trainers on maps ==")
+  if not map_result then
+    log("  SKIP  maps were not located")
+    return
+  end
+
+  local runs = trainers.locate(rom)
+  if not check("trainer parties are available", runs ~= nil) then
+    return
+  end
+
+  local all = {}
+  for _, run in ipairs(runs) do
+    for _, entry in ipairs(run.entries) do
+      all[#all + 1] = entry
+    end
+  end
+
+  local groups, group_err = trainers.locate_groups(rom, all)
+  if not check("located the trainer class table", groups ~= nil, group_err) then
+    return
+  end
+
+  local classes = 0
+  for _ in pairs(groups.classes) do
+    classes = classes + 1
+  end
+  log("        class table at 0x%06X, %d classes resolved",
+    groups.offset, classes)
+  -- The table length is discovered, not assumed: Crystal stops at 57.
+  check("a full set of trainer classes resolves", classes >= 50,
+    ("%d classes"):format(classes))
+
+  -- Reaching a known trainer through (class, id) rather than through the flat
+  -- list is what says the class boundaries are right.
+  -- Walking a class by (class, id) has to agree with the flat scan for the
+  -- trainers it can reach. Named leaders are the clearest check.
+  local reachable_names = {}
+  for class = 1, trainers.MAX_CLASSES do
+    if groups.classes[class] then
+      for id = 1, 32 do
+        local record = trainers.party_for(rom, groups, class, id)
+        if not record then
+          break
+        end
+        reachable_names[record.name] = { class = class, id = id, record = record }
+      end
+    end
+  end
+
+  local named = 0
+  for _, who in ipairs { "WILL", "BRUNO", "KAREN", "KOGA", "LANCE", "BROCK",
+                         "MISTY", "EUSINE" } do
+    if reachable_names[who] then
+      named = named + 1
+    end
+  end
+  check("named leaders are reachable by class and id", named >= 6,
+    ("%d of 8"):format(named))
+
+  local total_reachable = 0
+  for _ in pairs(reachable_names) do
+    total_reachable = total_reachable + 1
+  end
+  log("        %d distinct trainers reachable by class and id", total_reachable)
+
+  -- Every trainer object on a map must reach a real party, which ties the
+  -- object type nibble, the trainer block and the class table together.
+  local objects, trainer_objects, resolved = 0, 0, 0
+  local out_of_range = 0
+  local unresolved_examples = {}
+
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local bank = math.floor(header.attributes.scripts / 0x4000)
+      for _, object in ipairs(decoded.objects) do
+        objects = objects + 1
+        if object.kind == events.OBJECT_TRAINER and object.script then
+          trainer_objects = trainer_objects + 1
+          local block = events.decode_trainer(rom, bank, object.script)
+          if block then
+            if block.class > classes then
+              -- Names a class the table does not have. These are almost
+              -- certainly not trainers at all: the block validator's class
+              -- bound is generous, so a few non-trainer scripts slip through.
+              out_of_range = out_of_range + 1
+            else
+              local party = trainers.party_for(rom, groups, block.class, block.id)
+              if party then
+                resolved = resolved + 1
+              elseif #unresolved_examples < 4 then
+                unresolved_examples[#unresolved_examples + 1] =
+                  ("class %d id %d"):format(block.class, block.id)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  log("        %d objects, %d are trainers, %d reach a party, "
+    .. "%d name a class outside the table",
+    objects, trainer_objects, resolved, out_of_range)
+  check("Crystal has hundreds of trainer objects", trainer_objects >= 250,
+    ("%d"):format(trainer_objects))
+  -- Not asserted at 100%, because it is not 100%. The party validator still
+  -- rejects a minority of entries, and a rejection part-way through a class
+  -- truncates every trainer after it in that class. Bounded here so the number
+  -- cannot quietly get worse while the shortfall stays visible.
+  check("most trainers reach a party", resolved >= trainer_objects * 0.8,
+    ("%d of %d; e.g. %s"):format(resolved, trainer_objects,
+      table.concat(unresolved_examples, ", ")))
+
+  -- The type nibble must actually discriminate: objects that are not type 2
+  -- should not parse as trainer blocks.
+  local false_positives = 0
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local bank = math.floor(header.attributes.scripts / 0x4000)
+      for _, object in ipairs(decoded.objects) do
+        if object.kind ~= events.OBJECT_TRAINER and object.script then
+          if events.decode_trainer(rom, bank, object.script) then
+            false_positives = false_positives + 1
+          end
+        end
+      end
+    end
+  end
+  -- The type nibble has to be doing real work: if scripts in general looked
+  -- like trainer blocks, the classification would mean nothing. It is not
+  -- zero, because the block validator is only a range check.
+  log("        %d of %d non-trainer objects would parse as a trainer block",
+    false_positives, objects - trainer_objects)
+  check("the type nibble discriminates",
+    false_positives < (objects - trainer_objects) * 0.25,
+    ("%d of %d"):format(false_positives, objects - trainer_objects))
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -2020,6 +2163,8 @@ function harness.run(rom_path, report_path)
     test_save(found and found.base_stats)
     test_status(found and found.base_stats, found and found.moves)
     test_menu()
+    test_trainer_objects(rom, map_result,
+      found and found.species_names and found.species_names.records)
     test_battle(found and found.base_stats, found and found.moves,
       found and found.species_names and found.species_names.records,
       found and found.move_names and found.move_names.records)

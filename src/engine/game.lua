@@ -62,6 +62,9 @@ function game.new(game_id, start_index)
   instance.move_records = cache.read(game_id, "moves")
   instance.move_name_records = cache.read(game_id, "move_names")
   instance.learnset_records = cache.read(game_id, "learnsets")
+  instance.trainer_classes = cache.read(game_id, "trainer_classes")
+  -- Trainers already beaten, keyed by their event flag. Saved with the game.
+  instance.beaten = {}
 
   -- A save takes precedence over the default starting map.
   local restored = instance:restore()
@@ -84,6 +87,7 @@ function game:save()
     cell_y = self.player.cell_y,
     facing = self.player.facing,
     party = self.party,
+    beaten = self.beaten,
   })
 
   if ok then
@@ -114,6 +118,7 @@ function game:restore()
   end
 
   self.party = state.party
+  self.beaten = state.beaten or {}
   self:enter(state.map_index, state.cell_x, state.cell_y, state.facing)
   self:notify(("Loaded. Party: %d"):format(#state.party))
   return true
@@ -208,6 +213,25 @@ end
 -- Used by the screenshot mode to exercise the whole path from collision
 -- classification through the encounter tables to the text box.
 -- @param demo "catch" to throw a ball immediately, otherwise open the menu
+--- Stand in front of the first trainer in the game and start the fight.
+function game:show_trainer_demo()
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, object in ipairs(map.objects or {}) do
+        if object.trainer and self.trainer_classes
+          and self.trainer_classes[object.trainer.class] then
+          self:enter(index, object.x, object.y + 1, "up")
+          if self:start_trainer_battle(object.trainer) then
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
 --- Walk off a connected edge and end up on the neighbouring map.
 -- Used by the screenshot mode to show a crossing rather than describe one.
 function game:show_connection_demo()
@@ -537,6 +561,94 @@ end
 
 --- Interact with whatever is in front of the player, or advance the dialogue
 -- already on screen.
+--- The trainer in front of the player, if there is one and they have not
+--- already been beaten.
+function game:facing_trainer()
+  local delta = FACING_DELTA[self.player.facing]
+  local x = self.player.cell_x + delta[1]
+  local y = self.player.cell_y + delta[2]
+
+  for _, object in ipairs(self.map.objects or {}) do
+    if object.x == x and object.y == y and object.trainer
+      and not self.beaten[object.trainer.flag] then
+      return object.trainer
+    end
+  end
+  return nil
+end
+
+--- Build a trainer's party from the cached class tables.
+-- @return party, trainer name
+function game:trainer_party(class, id)
+  local roster = self.trainer_classes and self.trainer_classes[class]
+  local record = roster and roster[id]
+  if not record then
+    return nil
+  end
+
+  local party = {}
+  for _, member in ipairs(record.party) do
+    local base = self.base_stats and self.base_stats[member.species]
+    if base then
+      local instance = pokemon.new(member.species, base, { level = member.level })
+
+      -- A trainer's Pokémon uses the moves the cartridge spells out where it
+      -- does, and falls back to the species learnset where it does not.
+      local known = {}
+      for _, move in ipairs(member.moves or {}) do
+        if move > 0 then
+          known[#known + 1] = move
+        end
+      end
+      instance.moves = #known > 0 and known
+        or pokemon.moves_from_learnset(instance, self.learnset_records)
+      instance.held_item = member.item
+
+      party[#party + 1] = instance
+    end
+  end
+
+  if #party == 0 then
+    return nil
+  end
+  return party, record.name
+end
+
+--- Begin a trainer battle.
+function game:start_trainer_battle(trainer)
+  local party, name = self:trainer_party(trainer.class, trainer.id)
+  if not party then
+    self:notify(("no party for class %d trainer %d")
+      :format(trainer.class, trainer.id))
+    return false
+  end
+
+  local leader = self:party_leader()
+  if not leader then
+    return false
+  end
+  leader.hp = leader.stats.hp
+
+  self.trainer = {
+    flag = trainer.flag,
+    class = trainer.class,
+    id = trainer.id,
+    name = name or "TRAINER",
+    party = party,
+    sent = 1,
+  }
+
+  self.battle = battle.new(leader, party[1], self.move_records or {},
+    self.move_name_records or {}, self.species_names or {})
+  self.battle_lines = {
+    ("%s wants to fight!"):format(self.trainer.name),
+    ("Sent out %s!"):format(self.species_names[party[1].species] or "?"),
+  }
+  self.battle_state = "message"
+  self.battle_menu = 1
+  return true
+end
+
 function game:interact()
   if self.battle then
     self:battle_advance()
@@ -552,6 +664,12 @@ function game:interact()
   end
 
   if self.player.moving then
+    return
+  end
+
+  -- A trainer takes precedence: facing one starts a fight rather than a chat.
+  local trainer = self:facing_trainer()
+  if trainer and self:start_trainer_battle(trainer) then
     return
   end
 
@@ -853,6 +971,36 @@ function game:battle_fight()
   end
 end
 
+--- Send out the trainer's next Pokémon, if they have one left.
+-- @return true when another was sent, false when the trainer is beaten
+function game:send_next_trainer_pokemon()
+  local next_index = self.trainer.sent + 1
+  local next_mon = self.trainer.party[next_index]
+
+  if not next_mon then
+    -- Out of Pokémon: the trainer is beaten, and stays beaten.
+    self.beaten[self.trainer.flag] = true
+    self.battle.over = true
+    self.battle.winner = "player"
+    self.battle_lines = {
+      ("%s is out of"):format(self.trainer.name),
+      "usable POKEMON!",
+      ("%s won!"):format(self.trainer.name and "You" or "You"),
+    }
+    self.trainer = nil
+    return true
+  end
+
+  self.trainer.sent = next_index
+  self.battle.opponent = next_mon
+  next_mon.stages = stages.new()
+  self.battle_lines = {
+    ("%s sent out"):format(self.trainer.name),
+    ("%s!"):format(self.species_names[next_mon.species] or "?"),
+  }
+  return true
+end
+
 --- Advance the battle. A message waits for the player, then the action menu
 -- appears; choosing an action produces the next message.
 function game:battle_advance()
@@ -864,10 +1012,17 @@ function game:battle_advance()
     self.battle = nil
     self.battle_lines = nil
     self.battle_state = nil
+    self.trainer = nil
     return
   end
 
   if self.battle_state == "message" then
+    -- A trainer sends out the next Pokémon rather than losing outright.
+    if self.trainer and self.battle.opponent.hp <= 0 then
+      if self:send_next_trainer_pokemon() then
+        return
+      end
+    end
     self.battle_state = "menu"
     return
   end
@@ -876,7 +1031,15 @@ function game:battle_advance()
   if action == "FIGHT" then
     self:battle_fight()
   elseif action == "BALL" then
-    self:throw_ball()
+    if self.trainer then
+      -- Balls are for wild Pokémon; a trainer's are not yours to take.
+      self.battle_lines = { "Don't be a thief!" }
+    else
+      self:throw_ball()
+    end
+  elseif self.trainer then
+    -- There is no running from a trainer.
+    self.battle_lines = { "No running from a", "trainer battle!" }
   else
     -- Fleeing a wild battle always works for now. The real game weighs speed
     -- against the opponent's and counts attempts.

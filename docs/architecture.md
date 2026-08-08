@@ -584,3 +584,39 @@ Both can be negative, so they are read as signed bytes.
 Crossing is checked before warps in the arrival handler, because once the player
 has stepped over an edge the cell they occupy does not exist on the current map
 and nothing else can be asked about it sensibly.
+
+## Trainer battles
+
+An object event packs a palette and an object type into one byte as two nibbles.
+Which type value means "trainer" is a constant we do not have, so it was found
+by asking which value's objects have a script that parses as a twelve-byte
+trainer block: type 2 manages 332 of 333, and the other types none.
+
+A trainer object's script points at that block rather than at bytecode — event
+flag, class, id, then four text pointers — and the class and id reach a party
+through a class table whose entries are near pointers to the first trainer of
+each class.
+
+Two mistakes are worth recording because both produced confident wrong answers.
+
+**A loose validator makes a classifier look useless.** The first trainer-block
+check only required class and id to be non-zero, and 812 of the 1134
+non-trainer objects satisfied it. That made the type nibble appear to
+discriminate nothing. Bounding class and id to real ranges cut it to 188.
+
+**Reading a table until the first failure truncates it at the first awkward
+entry.** The class table stops resolving at class 51 and then resumes: classes
+55 to 57 are plainly real, holding KEITH, GRUNT and EUSINE. Stopping at the
+first miss gave 50 classes; tolerating gaps and stopping after several
+consecutive misses gives 56.
+
+### What is not reached
+
+274 of 332 trainer objects reach a party. 42 name a class outside the table and
+are probably not trainers at all — the block validator's class bound is only a
+range check. The rest fail because the party validator still rejects a minority
+of entries, and a rejection part-way through a class truncates every trainer
+after it in that class.
+
+The tests bound this rather than asserting it away, so the number can be
+improved but cannot quietly get worse.

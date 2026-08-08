@@ -48,6 +48,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Audio | not started |
 | Reading real .sav files | not started |
 | **Engine:** map edge connections | working — 142 crossings |
+| **Engine:** trainer battles | working — 274 of 332 reach a party |
 
 Import a cartridge and press enter. Move with the arrow keys or WASD; doors
 warp between maps and routes run into each other at their edges, with the
@@ -57,7 +58,7 @@ starts a battle, where Z confirms and the arrows pick FIGHT, BALL or RUN — a
 caught Pokemon joins your party. X opens the menu — party list and summaries.
 F5 saves; a save is loaded automatically.
 
-270 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+277 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

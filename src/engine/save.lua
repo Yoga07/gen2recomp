@@ -93,6 +93,16 @@ function save.write(game, state)
     cell_y = state.cell_y,
     facing = state.facing,
     party = party,
+    -- Which trainers have been beaten. Serialised as a list because the keys
+    -- are sparse numbers and a list survives the round trip more predictably.
+    beaten = (function()
+      local flags = {}
+      for flag in pairs(state.beaten or {}) do
+        flags[#flags + 1] = flag
+      end
+      table.sort(flags)
+      return flags
+    end)(),
     saved_at = os.time(),
   }
 
@@ -137,12 +147,18 @@ function save.read(game, base_stats)
     end
   end
 
+  local beaten = {}
+  for _, flag in ipairs(record.beaten or {}) do
+    beaten[flag] = true
+  end
+
   return {
     map_index = record.map_index,
     cell_x = record.cell_x,
     cell_y = record.cell_y,
     facing = record.facing,
     party = party,
+    beaten = beaten,
     saved_at = record.saved_at,
   }
 end

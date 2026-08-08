@@ -38,6 +38,68 @@ events.MAX_COUNT = 64
 -- Two movement tiles per block edge.
 events.TILES_PER_BLOCK = 2
 
+-- Object type nibbles.
+events.OBJECT_SCRIPT = 0
+events.OBJECT_ITEM = 1
+events.OBJECT_TRAINER = 2
+
+-- A trainer object's script points at this instead of bytecode:
+--   0-1  event flag, set once the trainer has been beaten
+--   2    trainer class
+--   3    trainer id within that class
+--   4-5  what they say on sight
+--   6-7  what they say on losing
+--   8-9  script to run on losing, often absent
+--   10-11 what they say afterwards
+events.TRAINER_BLOCK = 12
+
+-- Crystal has 67 trainer classes, and no class holds anywhere near this many.
+events.MAX_TRAINER_CLASS = 67
+events.MAX_TRAINER_ID = 64
+
+--- Read the trainer block a trainer object points at.
+-- @param bank the bank the object's script pointer is relative to
+function events.decode_trainer(rom, bank, addr)
+  if addr < 0x4000 or addr > 0x7FFF then
+    return nil, "script pointer out of range"
+  end
+  local at = bank * 0x4000 + (addr - 0x4000)
+  if at + events.TRAINER_BLOCK > rom.size then
+    return nil, "trainer block runs past the ROM"
+  end
+
+  -- Bounds matter here. Without them almost any script's opening bytes pass:
+  -- checking only that class and id are non-zero accepted 812 of the 1134
+  -- non-trainer objects, which would have made the type nibble look useless.
+  local class = rom:u8(at + 2)
+  local id = rom:u8(at + 3)
+  if class < 1 or class > events.MAX_TRAINER_CLASS then
+    return nil, ("class %d is out of range"):format(class)
+  end
+  if id < 1 or id > events.MAX_TRAINER_ID then
+    return nil, ("id %d is out of range"):format(id)
+  end
+
+  local function pointer(index)
+    local value = rom:u16le(at + 4 + index * 2)
+    if value == 0 then
+      return nil
+    end
+    return (value >= 0x4000 and value <= 0x7FFF) and value or nil
+  end
+
+  return {
+    offset = at,
+    flag = rom:u16le(at),
+    class = class,
+    id = id,
+    seen_text = pointer(0),
+    beaten_text = pointer(1),
+    loss_script = pointer(2),
+    after_text = pointer(3),
+  }
+end
+
 events.bg_types = {
   [0] = "read", "up", "down", "right", "left", "if_set", "if_not_set",
   "item", "copy",
@@ -176,7 +238,13 @@ function events.decode(rom, header)
       radius_x = math.floor(radius / 16),
       hour = rom:u8(at + 5),
       time_of_day = rom:u8(at + 6),
+      -- One byte holding two nibbles: palette above, object type below. Type
+      -- 2 is a trainer, established by checking which value's objects have a
+      -- script that parses as a trainer block — 332 of 333 do, against none
+      -- for the other types.
       colour_function = rom:u8(at + 7),
+      palette = math.floor(rom:u8(at + 7) / 16),
+      kind = rom:u8(at + 7) % 16,
       sight_range = rom:u8(at + 8),
       script = near_pointer(rom, at + 9),
       event_flag = rom:u16le(at + 11),
