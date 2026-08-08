@@ -10,6 +10,7 @@ local cache = require("src.import.cache")
 local wild = require("src.engine.wild")
 local pokemon = require("src.engine.pokemon")
 local battle = require("src.engine.battle")
+local catching = require("src.engine.catching")
 
 local game = {}
 game.__index = game
@@ -150,7 +151,8 @@ end
 --- Stand on the first grass tile in the game and force an encounter.
 -- Used by the screenshot mode to exercise the whole path from collision
 -- classification through the encounter tables to the text box.
-function game:show_first_encounter()
+-- @param demo "catch" to throw a ball immediately, otherwise open the menu
+function game:show_first_encounter(demo)
   for index = 1, self.world:map_count() do
     local map = self.world:map(index)
     if not map.unparsed and map.encounters then
@@ -164,9 +166,18 @@ function game:show_first_encounter()
             end)
             if met then
               self:wild_encounter(met)
+              if demo == "catch" and self.battle then
+                -- Weaken it and throw, so the screenshot shows a catch
+                -- resolving through the party rather than a menu.
+                self.battle.opponent.hp = 1
+                self:throw_ball()
+                return true
+              end
               -- Run one turn so the screenshot shows a battle in progress
               -- rather than only the opening line.
               if self.battle then
+                -- Advance to the action menu so the screenshot shows the
+                -- choice rather than only the opening line.
                 self:battle_advance()
               end
               return true
@@ -313,21 +324,43 @@ end
 --
 -- There is no battle yet, so this announces the encounter through the text box.
 -- When the battle engine exists this is where it hands over.
---- Give the player a Pokémon to fight with.
+game.PARTY_LIMIT = 6
+
+--- The player's party.
 --
--- There is no save file and no starter choice yet, so the party is one
--- Cyndaquil, built the moment it is first needed.
+-- There is no save file and no starter choice yet, so it begins as one
+-- Cyndaquil, built the moment it is first needed. Caught Pokémon join it.
 function game:party_leader()
-  if not self.party_member then
+  self.party = self.party or {}
+
+  if #self.party == 0 then
     local base = self.base_stats and self.base_stats[155]
     if not base then
       return nil
     end
-    self.party_member = pokemon.new(155, base, { level = 10 })
-    self.party_member.moves =
-      pokemon.moves_from_learnset(self.party_member, self.learnset_records)
+    local starter = pokemon.new(155, base, { level = 10 })
+    starter.moves = pokemon.moves_from_learnset(starter, self.learnset_records)
+    self.party[1] = starter
   end
-  return self.party_member
+
+  -- The first member still standing leads.
+  for _, member in ipairs(self.party) do
+    if member.hp > 0 then
+      return member
+    end
+  end
+  return self.party[1]
+end
+
+--- Add a caught Pokémon to the party.
+-- @return true when it joined, false when the party is full
+function game:add_to_party(instance)
+  self.party = self.party or {}
+  if #self.party >= game.PARTY_LIMIT then
+    return false
+  end
+  self.party[#self.party + 1] = instance
+  return true
 end
 
 function game:wild_encounter(met)
@@ -351,16 +384,75 @@ function game:wild_encounter(met)
   if opponent.shiny then
     self.battle_lines[#self.battle_lines + 1] = "It is shiny!"
   end
+
+  -- The wild Pokémon's catch rate comes from its species record.
+  self.battle_catch_rate = base.catch_rate or 255
+  self.battle_state = "message"
   self.battle_menu = 1
+end
+
+game.BATTLE_ACTIONS = { "FIGHT", "BALL", "RUN" }
+
+--- Throw a ball at the wild Pokémon.
+function game:throw_ball()
+  local opponent = self.battle.opponent
+  local caught, value = catching.attempt(opponent, self.battle_catch_rate, "poke")
+
+  local lines = { "Threw a BALL!" }
+
+  if caught then
+    if self:add_to_party(opponent) then
+      lines[#lines + 1] = ("Caught %s!")
+        :format(self.species_names[opponent.species] or "?")
+      lines[#lines + 1] = ("Party: %d"):format(#self.party)
+    else
+      lines[#lines + 1] = "The party is full!"
+    end
+    self.battle.over = true
+    self.battle.winner = "player"
+  else
+    local shakes = catching.shakes(value)
+    if shakes == 0 then
+      lines[#lines + 1] = "It missed entirely!"
+    elseif shakes >= 3 then
+      lines[#lines + 1] = "Almost had it!"
+    else
+      lines[#lines + 1] = ("It shook %d times."):format(shakes)
+    end
+    lines[#lines + 1] = "It broke free!"
+
+    -- A failed throw costs the turn, so the wild Pokémon still attacks.
+    local move = opponent.moves[math.random(1, math.max(#opponent.moves, 1))]
+      or pokemon.STRUGGLE
+    self.battle:strike(opponent, self.battle.player, move)
+    for _, line in ipairs(self.battle.log) do
+      lines[#lines + 1] = line
+    end
+  end
+
+  self.battle_lines = lines
 end
 
 --- Encode plain ASCII into the cartridge's character codes, so runtime messages
 -- can be drawn with the same font as the cartridge's own text.
 function game:encode(str)
   local codes = {}
-  for i = 1, #str do
+  local i = 1
+  while i <= #str do
     local char = str:sub(i, i)
     local byte_value = char:byte()
+
+    -- "é" is two bytes in UTF-8, so it must be matched before the single-byte
+    -- cases. It maps to $BA, which is correct for cartridge text — the
+    -- extracted dialogue decodes POKéMON properly — but tile $BA - $40 in the
+    -- font sheet is blank, so the glyph does not draw. Where the font actually
+    -- keeps the accent is unresolved; runtime strings avoid it meanwhile.
+    if byte_value == 0xC3 and str:byte(i + 1) == 0xA9 then
+      codes[#codes + 1] = 0xBA
+      i = i + 2
+      goto continue
+    end
+
     if char >= "A" and char <= "Z" then
       codes[#codes + 1] = 0x80 + byte_value - 65
     elseif char >= "a" and char <= "z" then
@@ -386,26 +478,27 @@ function game:encode(str)
     elseif char == ":" then
       codes[#codes + 1] = 0x9C
     end
+
+    i = i + 1
+    ::continue::
   end
   return codes
 end
 
---- Advance the battle: run a turn, or dismiss it once it is over.
-function game:battle_advance()
-  if not self.battle then
+--- Move the action cursor.
+function game:battle_menu_move(delta)
+  if not self.battle or self.battle_state ~= "menu" then
     return
   end
+  local count = #game.BATTLE_ACTIONS
+  self.battle_menu = ((self.battle_menu - 1 + delta) % count) + 1
+end
 
-  if self.battle.over then
-    self.battle = nil
-    self.battle_lines = nil
-    return
-  end
-
+--- Fight with the leader's first move.
+function game:battle_fight()
   local leader = self.battle.player
   local opponent = self.battle.opponent
-  local player_move = leader.moves[self.battle_menu] or leader.moves[1]
-    or pokemon.STRUGGLE
+  local player_move = leader.moves[1] or pokemon.STRUGGLE
   -- The opponent picks at random; there is no battle AI yet.
   local opponent_move = opponent.moves[math.random(1, math.max(#opponent.moves, 1))]
     or pokemon.STRUGGLE
@@ -414,6 +507,41 @@ function game:battle_advance()
   if #self.battle_lines == 0 then
     self.battle_lines = { "Nothing happened." }
   end
+end
+
+--- Advance the battle. A message waits for the player, then the action menu
+-- appears; choosing an action produces the next message.
+function game:battle_advance()
+  if not self.battle then
+    return
+  end
+
+  if self.battle.over then
+    self.battle = nil
+    self.battle_lines = nil
+    self.battle_state = nil
+    return
+  end
+
+  if self.battle_state == "message" then
+    self.battle_state = "menu"
+    return
+  end
+
+  local action = game.BATTLE_ACTIONS[self.battle_menu] or "FIGHT"
+  if action == "FIGHT" then
+    self:battle_fight()
+  elseif action == "BALL" then
+    self:throw_ball()
+  else
+    -- Fleeing a wild battle always works for now. The real game weighs speed
+    -- against the opponent's and counts attempts.
+    self.battle_lines = { "Got away safely!" }
+    self.battle.over = true
+    self.battle.winner = "fled"
+  end
+
+  self.battle_state = "message"
 end
 
 --- Draw one health bar.
@@ -463,6 +591,20 @@ function game:draw_battle()
   love.graphics.rectangle("fill", 0, top, game.SCREEN_WIDTH, 48)
   love.graphics.setColor(0.1, 0.1, 0.1)
   love.graphics.rectangle("line", 2.5, top + 2.5, game.SCREEN_WIDTH - 5, 43)
+
+  -- The action menu replaces the message while the player is choosing.
+  if self.battle_state == "menu" and self.bitmap_font then
+    for i, action in ipairs(game.BATTLE_ACTIONS) do
+      local y = top + 6 + (i - 1) * 12
+      self.bitmap_font:draw_codes(self:encode(action), 20, y)
+      if i == self.battle_menu then
+        love.graphics.setColor(0.1, 0.1, 0.1)
+        love.graphics.rectangle("fill", 10, y + 2, 5, 5)
+      end
+    end
+    love.graphics.setColor(1, 1, 1)
+    return
+  end
 
   -- The screen fits 19 glyphs at eight pixels each, so anything longer has to
   -- wrap rather than run off the edge.

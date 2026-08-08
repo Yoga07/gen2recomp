@@ -11,8 +11,8 @@ project does not emulate the Game Boy.
 
 ## Status
 
-Early. The data pipeline works and is verified against a real cartridge; the
-engine does not exist yet.
+The data pipeline is verified against a real cartridge, and the engine runs:
+you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 
 | Area | State |
 | --- | --- |
@@ -37,20 +37,21 @@ engine does not exist yet.
 | **Engine:** wild encounter trigger | working — grass, and cave floor |
 | **Engine:** Pokémon stats and party | working |
 | **Engine:** battles — types, damage, turn order | working |
+| **Engine:** catching and party | working |
 | Map scripts | walked for text: 480 of 2200 |
-| Level-up learnsets and evolutions | working — 251 species |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Script bytecode beyond text | not started |
-| Status conditions, stat stages, catching, items | not started |
+| Status conditions, stat stages, items | not started |
 | Menus, save, audio | not started |
 | Map edge connections | extracted, not implemented |
 
-You can walk around and fight. Import a cartridge, press enter, and move with
-the arrow keys or WASD; doors warp between maps, and the player and NPCs are
-drawn with the cartridge's own sprites. Press Z or space to read a signpost or
-talk to someone. Walking in tall grass starts a battle — Z advances a turn.
+Import a cartridge and press enter. Move with the arrow keys or WASD; doors
+warp between maps, and the player and NPCs are drawn with the cartridge's own
+sprites. Z or space reads a signpost or talks to someone. Walking in tall grass
+starts a battle, where Z confirms and the arrows pick FIGHT, BALL or RUN — a
+caught Pokemon joins your party.
 
-199 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+208 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

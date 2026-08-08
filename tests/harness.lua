@@ -1351,6 +1351,69 @@ local function test_learnsets(rom, species_names, move_names)
     table.concat(sample, ", "))
 end
 
+--- Catching.
+local function test_catching(base_stats)
+  log("\n== catching ==")
+  if not base_stats then
+    log("  SKIP  base stats were not located")
+    return
+  end
+
+  local catching = require("src.engine.catching")
+  local pokemon = require("src.engine.pokemon")
+  local stats = base_stats.records
+
+  local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
+  local target = pokemon.new(19, stats[19], { level = 10, dvs = perfect })
+  local rate = stats[19].catch_rate
+
+  -- A hurt target is easier to catch than a healthy one.
+  local healthy = catching.value(target, rate, "poke")
+  target.hp = 1
+  local hurt = catching.value(target, rate, "poke")
+  check("a hurt target is easier to catch", hurt > healthy,
+    ("%d at 1 HP vs %d at full"):format(hurt, healthy))
+
+  -- Better balls are better.
+  target.hp = target.stats.hp
+  local poke = catching.value(target, rate, "poke")
+  local great = catching.value(target, rate, "great")
+  local ultra = catching.value(target, rate, "ultra")
+  check("a Great Ball beats a Poké Ball", great > poke,
+    ("%d vs %d"):format(great, poke))
+  check("an Ultra Ball beats a Great Ball", ultra > great,
+    ("%d vs %d"):format(ultra, great))
+
+  -- The Master Ball never fails, whatever the target.
+  local legendary = pokemon.new(150, stats[150], { level = 70, dvs = perfect })
+  local caught = catching.attempt(legendary, stats[150].catch_rate, "master",
+    nil, 255)
+  check("the Master Ball always catches", caught)
+
+  -- Mewtwo in an ordinary ball at full health should essentially never work.
+  local hopeless = catching.value(legendary, stats[150].catch_rate, "poke")
+  check("a legendary at full health resists a Poké Ball", hopeless < 20,
+    ("value %d"):format(hopeless))
+
+  -- Sleep helps more than nothing does. Note the Gen 2 quirk: the "nothing"
+  -- case still receives the smaller bonus rather than none.
+  target.hp = math.floor(target.stats.hp / 2)
+  local awake = catching.value(target, rate, "poke")
+  local asleep = catching.value(target, rate, "poke", "sleep")
+  check("sleep helps", asleep > awake, ("%d vs %d"):format(asleep, awake))
+  check_equal("the quirk is preserved: no status still adds 5",
+    asleep - awake, catching.SLEEP_FREEZE_BONUS - catching.OTHER_BONUS)
+
+  -- The roll decides, and the boundary is exclusive.
+  local value = catching.value(target, rate, "poke")
+  check("a roll below the value catches",
+    (catching.attempt(target, rate, "poke", nil, value - 1)))
+  check("a roll at the value does not",
+    not (catching.attempt(target, rate, "poke", nil, value)))
+
+  log("        Rattata L10 half HP: value %d of 255", value)
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1605,6 +1668,7 @@ function harness.run(rom_path, report_path)
     test_learnsets(rom,
       found and found.species_names and found.species_names.records,
       found and found.move_names and found.move_names.records)
+    test_catching(found and found.base_stats)
     test_battle(found and found.base_stats, found and found.moves,
       found and found.species_names and found.species_names.records,
       found and found.move_names and found.move_names.records)
