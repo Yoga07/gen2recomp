@@ -16,6 +16,7 @@ local HEADLESS = {
   ["--probe-palettes"] = "tests.probe_palettes",
   ["--probe-tilesets"] = "tests.probe_tilesets",
   ["--probe-maps"] = "tests.probe_maps",
+  ["--probe-connections"] = "tests.probe_connections",
   ["--probe-events"] = "tests.probe_events",
   ["--probe-collision"] = "tests.probe_collision",
   ["--probe-collision2"] = "tests.probe_collision2",
@@ -133,7 +134,8 @@ function love.load(args)
         sign = (args[i + 2] == "sign" or args[i + 2] == "npc"
           or args[i + 2] == "grass" or args[i + 2] == "catch"
           or args[i + 2] == "catchsave" or args[i + 2] == "party"
-          or args[i + 2] == "menu") and args[i + 2] or nil,
+          or args[i + 2] == "menu" or args[i + 2] == "connection")
+          and args[i + 2] or nil,
         frames = 2,
       }
     end
@@ -150,7 +152,9 @@ function love.load(args)
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
     end
-    if state.shot and state.shot.sign == "party" then
+    if state.shot and state.shot.sign == "connection" then
+      state.game:show_connection_demo()
+    elseif state.shot and state.shot.sign == "party" then
       state.game:show_party_demo()
     elseif state.shot and state.shot.sign == "menu" then
       state.game:open_menu()

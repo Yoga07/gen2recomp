@@ -204,6 +204,51 @@ function world:walkable(map, cell_x, cell_y)
   return collision.walkable(value)
 end
 
+--- Which edge, if any, a cell lies beyond.
+function world:edge_beyond(map, cell_x, cell_y)
+  local width = map.width * world.CELLS_PER_BLOCK
+  local height = map.height * world.CELLS_PER_BLOCK
+
+  if cell_y < 0 then
+    return "north"
+  elseif cell_y >= height then
+    return "south"
+  elseif cell_x < 0 then
+    return "west"
+  elseif cell_x >= width then
+    return "east"
+  end
+  return nil
+end
+
+--- The connection covering the edge this cell lies beyond, if there is one.
+function world:connection_beyond(map, cell_x, cell_y)
+  local edge = self:edge_beyond(map, cell_x, cell_y)
+  if not edge then
+    return nil
+  end
+  for _, connection in ipairs(map.connections or {}) do
+    if connection.direction == edge then
+      return connection, edge
+    end
+  end
+  return nil
+end
+
+--- Where the player lands after crossing a connection.
+--
+-- The record's offset along the axis of travel is the arrival coordinate — a
+-- west connection to a ten-block map gives 19, its rightmost cell — while the
+-- perpendicular offset aligns the two maps and is added to where the player
+-- was.
+-- @return cell_x, cell_y on the destination map
+function world.arrival(connection, cell_x, cell_y)
+  if connection.direction == "north" or connection.direction == "south" then
+    return cell_x + connection.x_offset, connection.y_offset
+  end
+  return connection.x_offset, cell_y + connection.y_offset
+end
+
 --- May the player move onto this cell?
 --
 -- Not the same as walkable. A door is a wall tile with a warp on it — 544 of
@@ -213,6 +258,13 @@ function world:can_enter(map, cell_x, cell_y)
   if self:warp_at(map, cell_x, cell_y) then
     return true
   end
+
+  -- Walking off an edge is allowed where a connection continues the world;
+  -- the transfer happens once the step completes.
+  if self:connection_beyond(map, cell_x, cell_y) then
+    return true
+  end
+
   return self:walkable(map, cell_x, cell_y)
 end
 

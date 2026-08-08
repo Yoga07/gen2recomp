@@ -557,3 +557,30 @@ chance, which is out of 255 rather than 100.
 reports anything else as unmodelled rather than silently doing nothing. Most of
 the hundred-odd effect values — multi-hit, recoil, drain, one-hit knockouts,
 weather, protection, the many one-move specials — are still absent.
+
+## Map connections
+
+A connection record follows the attributes record, one per set bit in the
+connection mask, in north/south/west/east order, twelve bytes each: destination
+map group and number, a pointer into that map's block data, where the strip
+lands in the overworld buffer, the strip length, the destination's width, two
+alignment bytes, and a window pointer.
+
+The connection macro was not in the files reachable from the reference, so the
+layout was reasoned rather than read — and then **checked rather than trusted**.
+Byte 7 is supposed to be the destination map's width, and every destination has
+its own header saying what its width really is. Scoring all twelve byte
+positions against that gives byte 7 at 142 of 142, with the next best at 31%.
+That is not a layout anyone has to take on faith.
+
+The two alignment bytes turn out to mean different things depending on which
+one lies along the direction of travel. The one on the axis of travel is the
+arrival coordinate outright — a west connection into a ten-block-wide map gives
+19, its rightmost cell; a north connection into an eighteen-block-tall map gives
+35, its bottom row. The perpendicular one is an offset added to where the player
+was, which is what keeps them lined up when the two maps are different sizes.
+Both can be negative, so they are read as signed bytes.
+
+Crossing is checked before warps in the arrival handler, because once the player
+has stepped over an edge the cell they occupy does not exist on the current map
+and nothing else can be asked about it sensibly.

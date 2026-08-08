@@ -208,6 +208,42 @@ end
 -- Used by the screenshot mode to exercise the whole path from collision
 -- classification through the encounter tables to the text box.
 -- @param demo "catch" to throw a ball immediately, otherwise open the menu
+--- Walk off a connected edge and end up on the neighbouring map.
+-- Used by the screenshot mode to show a crossing rather than describe one.
+function game:show_connection_demo()
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, connection in ipairs(map.connections or {}) do
+        local start = self.groups[connection.group]
+        local target = start and self.world:map(start + connection.number - 1)
+        if target and not target.unparsed then
+          local width = map.width * world.CELLS_PER_BLOCK
+          local height = map.height * world.CELLS_PER_BLOCK
+          local x, y
+
+          if connection.direction == "north" then
+            x, y = math.floor(width / 2), -1
+          elseif connection.direction == "south" then
+            x, y = math.floor(width / 2), height
+          elseif connection.direction == "west" then
+            x, y = -1, math.floor(height / 2)
+          else
+            x, y = width, math.floor(height / 2)
+          end
+
+          self:enter(index)
+          self:take_connection(connection, x, y)
+          self:notify(("crossed %s into map %d")
+            :format(connection.direction, start + connection.number - 1))
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
 --- Catch something, then open the party summary on it.
 -- Used by the screenshot mode to show the menus with real contents.
 function game:show_party_demo()
@@ -544,6 +580,14 @@ function game:update(dt)
     end)
 
   if event == "arrived" then
+    -- Stepping off an edge into a connected map comes first, because the cell
+    -- the player is now standing on does not exist on this map.
+    local connection = self.world:connection_beyond(self.map, cell_x, cell_y)
+    if connection then
+      self:take_connection(connection, cell_x, cell_y)
+      return
+    end
+
     local warp = self.world:warp_at(self.map, cell_x, cell_y)
     if warp then
       self:take_warp(warp)
@@ -559,6 +603,32 @@ function game:update(dt)
       end
     end
   end
+end
+
+--- Cross into a connected map, keeping the player's facing and momentum.
+function game:take_connection(connection, cell_x, cell_y)
+  local start = self.groups[connection.group]
+  local index = start and (start + connection.number - 1)
+  local destination = index and self.world:map(index)
+
+  if not destination or destination.unparsed then
+    -- Put the player back rather than stranding them off the edge.
+    self.player:place(
+      math.max(0, math.min(cell_x, self.map.width * world.CELLS_PER_BLOCK - 1)),
+      math.max(0, math.min(cell_y, self.map.height * world.CELLS_PER_BLOCK - 1)))
+    self:notify(("no map for group %d number %d")
+      :format(connection.group, connection.number))
+    return
+  end
+
+  local x, y = world.arrival(connection, cell_x, cell_y)
+
+  -- Clamp, because the alignment can put the player just outside a map whose
+  -- neighbour is wider than it is.
+  x = math.max(0, math.min(x, destination.width * world.CELLS_PER_BLOCK - 1))
+  y = math.max(0, math.min(y, destination.height * world.CELLS_PER_BLOCK - 1))
+
+  self:enter(index, x, y, self.player.facing)
 end
 
 --- Follow a warp to its destination.

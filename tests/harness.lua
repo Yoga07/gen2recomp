@@ -1855,6 +1855,77 @@ local function test_engine()
   check("maps that can roll for encounters are plentiful", rolling >= 80,
     ("%d maps"):format(rolling))
 
+  -- Map connections. The engine must let the player walk off an edge that has
+  -- one, and the arrival must land inside the destination.
+  -- Read locally: the warp section below reads this too, but later, and this
+  -- block runs first.
+  local group_starts = cache.read(game_id, "map_groups")
+
+  local with_connections, crossings, bad_arrivals, unresolved_targets = 0, 0, 0, 0
+  for index = 1, loaded:map_count() do
+    local map = loaded:map(index)
+    if not map.unparsed and #(map.connections or {}) > 0 then
+      with_connections = with_connections + 1
+
+      for _, connection in ipairs(map.connections) do
+        crossings = crossings + 1
+
+        local start = group_starts and group_starts[connection.group]
+        local target = start and loaded:map(start + connection.number - 1)
+        if not target or target.unparsed then
+          unresolved_targets = unresolved_targets + 1
+        else
+          -- The destination's own width must match what the record claims,
+          -- which is what confirms the field layout.
+          if connection.width ~= target.width then
+            bad_arrivals = bad_arrivals + 1
+          end
+        end
+      end
+    end
+  end
+
+  log("        %d maps have connections, %d crossings in total",
+    with_connections, crossings)
+  check("a good number of maps connect", with_connections >= 30,
+    ("%d maps"):format(with_connections))
+  check_equal("every connection names a map that exists", unresolved_targets, 0)
+  check_equal("every connection's width matches its destination",
+    bad_arrivals, 0)
+
+  -- Walking off a connected edge must be permitted, and off an unconnected one
+  -- must not.
+  local connected_map, connected_edge
+  for index = 1, loaded:map_count() do
+    local map = loaded:map(index)
+    if not map.unparsed and #(map.connections or {}) > 0 then
+      connected_map = map
+      connected_edge = map.connections[1]
+      break
+    end
+  end
+
+  if connected_map then
+    local width = connected_map.width * world.CELLS_PER_BLOCK
+    local height = connected_map.height * world.CELLS_PER_BLOCK
+    local probe_x, probe_y = 0, 0
+    if connected_edge.direction == "north" then
+      probe_x, probe_y = math.floor(width / 2), -1
+    elseif connected_edge.direction == "south" then
+      probe_x, probe_y = math.floor(width / 2), height
+    elseif connected_edge.direction == "west" then
+      probe_x, probe_y = -1, math.floor(height / 2)
+    else
+      probe_x, probe_y = width, math.floor(height / 2)
+    end
+
+    check("stepping off a connected edge is allowed",
+      loaded:can_enter(connected_map, probe_x, probe_y),
+      ("%s edge"):format(connected_edge.direction))
+    check("the edge resolves to its connection",
+      loaded:connection_beyond(connected_map, probe_x, probe_y) ~= nil)
+  end
+
   -- Off-map is blocked.
   local first
   for index = 1, loaded:map_count() do

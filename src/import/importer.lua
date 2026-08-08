@@ -348,7 +348,7 @@ function importer.run(path, progress)
           width = attributes.width,
           height = attributes.height,
           border_block = attributes.border_block,
-          connections = maps.connection_list(attributes),
+          connections = maps.decode_connections(rom, attributes),
           -- Kept so the script decoder has somewhere to start.
           script_offset = attributes.scripts,
           event_offset = attributes.events,

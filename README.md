@@ -47,16 +47,17 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** start menu, party list, summary | working |
 | Audio | not started |
 | Reading real .sav files | not started |
-| Map edge connections | extracted, not implemented |
+| **Engine:** map edge connections | working — 142 crossings |
 
 Import a cartridge and press enter. Move with the arrow keys or WASD; doors
-warp between maps, and the player and NPCs are drawn with the cartridge's own
+warp between maps and routes run into each other at their edges, with the
+player and NPCs drawn from the cartridge's own
 sprites. Z or space reads a signpost or talks to someone. Walking in tall grass
 starts a battle, where Z confirms and the arrows pick FIGHT, BALL or RUN — a
 caught Pokemon joins your party. X opens the menu — party list and summaries.
 F5 saves; a save is loaded automatically.
 
-265 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+270 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

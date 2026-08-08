@@ -304,6 +304,57 @@ function maps.group_index(headers, groups)
   return lookup
 end
 
+-- A connection record follows the attributes record, one per set bit in the
+-- connection mask, in north, south, west, east order.
+--
+--   0     destination map group
+--   1     destination map number
+--   2-3   pointer into the connected map's block data
+--   4-5   where that strip lands in the overworld buffer
+--   6     strip length in blocks
+--   7     the connected map's width in blocks
+--   8     y alignment
+--   9     x alignment
+--   10-11 window
+--
+-- The layout is not taken on trust. Byte 7 is the *destination* map's width, so
+-- it can be checked against that map's own header — a wrong field order does
+-- not survive that across the whole game.
+maps.CONNECTION_SIZE = 12
+
+maps.CONNECTION_ORDER = { "north", "south", "west", "east" }
+
+--- Decode the connection records that follow an attributes record.
+-- @return array of { direction, group, number, width, y_offset, x_offset }
+function maps.decode_connections(rom, attributes)
+  local connections = {}
+  local at = attributes.offset + maps.ATTRIBUTES_SIZE
+
+  for _, direction in ipairs(maps.CONNECTION_ORDER) do
+    local bit = maps.connection_bits[direction]
+    if attributes.connections % (bit * 2) >= bit then
+      if at + maps.CONNECTION_SIZE > rom.size then
+        return connections
+      end
+
+      connections[#connections + 1] = {
+        direction = direction,
+        group = rom:u8(at),
+        number = rom:u8(at + 1),
+        strip_length = rom:u8(at + 6),
+        width = rom:u8(at + 7),
+        -- Alignments are signed: a map can hang off either end of its
+        -- neighbour, so they are read as two's complement.
+        y_offset = rom:u8(at + 8) < 128 and rom:u8(at + 8) or rom:u8(at + 8) - 256,
+        x_offset = rom:u8(at + 9) < 128 and rom:u8(at + 9) or rom:u8(at + 9) - 256,
+      }
+      at = at + maps.CONNECTION_SIZE
+    end
+  end
+
+  return connections
+end
+
 --- Read a map's block data as a row-major grid of block ids.
 function maps.decode_block_data(rom, header)
   local attributes = header.attributes
