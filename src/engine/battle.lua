@@ -17,6 +17,9 @@
 -- special stats.
 
 local types = require("src.engine.types")
+local stages = require("src.engine.stages")
+local status = require("src.engine.status")
+local move_effects = require("src.engine.move_effects")
 
 local battle = {}
 battle.__index = battle
@@ -49,8 +52,20 @@ function battle.damage(attacker, defender, move, options)
   end
 
   local physical = types.is_physical(move.type)
-  local attack = physical and attacker.stats.attack or attacker.stats.special_attack
-  local defence = physical and defender.stats.defense or defender.stats.special_defense
+  local attack_stat = physical and "attack" or "special_attack"
+  local defence_stat = physical and "defense" or "special_defense"
+
+  -- Stage multipliers apply to the raw stat, and burn halves physical attack
+  -- on top of that. Burn is not a stage — it is a separate factor the game
+  -- applies where the stat is read.
+  local attack = stages.apply(attacker.stats[attack_stat],
+    attacker.stages and attacker.stages[attack_stat])
+  local defence = stages.apply(defender.stats[defence_stat],
+    defender.stages and defender.stages[defence_stat])
+
+  if physical then
+    attack = math.max(1, math.floor(attack * status.attack_factor(attacker)))
+  end
 
   local critical = options.crit
   if critical == nil then
@@ -97,9 +112,19 @@ end
 -- Move priority is not modelled yet — the priority of a move lives in its
 -- effect byte, which needs the effect table this does not have.
 function battle.order(a, b, coin)
-  if a.pokemon.stats.speed > b.pokemon.stats.speed then
+  -- Speed as it is in the moment: stage-adjusted, and quartered by paralysis.
+  -- This is what makes paralysis change who acts first rather than only how
+  -- often they act at all.
+  local function speed_of(entry)
+    local value = stages.apply(entry.pokemon.stats.speed,
+      entry.pokemon.stages and entry.pokemon.stages.speed)
+    return math.max(1, math.floor(value * status.speed_factor(entry.pokemon)))
+  end
+
+  local a_speed, b_speed = speed_of(a), speed_of(b)
+  if a_speed > b_speed then
     return a, b
-  elseif b.pokemon.stats.speed > a.pokemon.stats.speed then
+  elseif b_speed > a_speed then
     return b, a
   end
   coin = coin or math.random(0, 1)
@@ -111,6 +136,11 @@ end
 
 --- Start a battle between two Pokémon.
 function battle.new(player, opponent, moves, move_names, species_names)
+  -- Stages are per battle, not per Pokémon, so they start fresh here and are
+  -- discarded when the battle ends. Status is not: it persists.
+  player.stages = stages.new()
+  opponent.stages = stages.new()
+
   return setmetatable({
     player = player,
     opponent = opponent,
@@ -132,12 +162,48 @@ function battle:say(fmt, ...)
 end
 
 --- One Pokémon attacks another with one move.
+--- Apply a move's non-damage effect: a status, or a stat stage.
+function battle:apply_effect(attacker, defender, move, options)
+  local entry = move_effects.lookup(move.effect)
+  if not entry then
+    return
+  end
+
+  if not move_effects.fires(entry, move, options and options.effect_roll) then
+    return
+  end
+
+  local target = entry.target == "self" and attacker or defender
+  if target.hp <= 0 then
+    return
+  end
+
+  if entry.kind == "status" then
+    if status.apply(target, entry.status, options and options.status_random) then
+      self:say("%s %s", self:name_of(target), status.messages[entry.status])
+    end
+  else
+    local _, moved = stages.shift(target.stages, entry.stat, entry.delta)
+    self:say("%s's %s", self:name_of(target),
+      stages.describe(entry.stat, entry.delta, moved))
+  end
+end
+
 function battle:strike(attacker, defender, move_id, options)
   local move = self.moves[move_id]
   local name = self.move_names[move_id] or ("move " .. move_id)
 
   if not move then
     self:say("%s has no move!", self:name_of(attacker))
+    return
+  end
+
+  -- Sleep, freeze and paralysis can stop the attacker before anything else.
+  local acting, why = status.can_act(attacker, options and options.status_random)
+  if why then
+    self:say("%s %s", self:name_of(attacker), why)
+  end
+  if not acting then
     return
   end
 
@@ -154,6 +220,11 @@ function battle:strike(attacker, defender, move_id, options)
   if effectiveness == 0 then
     self:say("It doesn't affect %s.", self:name_of(defender))
     return
+  end
+
+  -- A fire move thaws whatever it hits, before the damage lands.
+  if status.thaw_on_hit(defender, move.type) then
+    self:say("%s thawed out!", self:name_of(defender))
   end
 
   defender.hp = math.max(0, defender.hp - damage)
@@ -174,6 +245,28 @@ function battle:strike(attacker, defender, move_id, options)
     self:say("%s fainted!", self:name_of(defender))
     self.over = true
     self.winner = (defender == self.player) and "opponent" or "player"
+    return
+  end
+
+  -- Status and stat changes land after the damage, and only if the target
+  -- survived it.
+  self:apply_effect(attacker, defender, move, options)
+end
+
+--- Poison and burn bite at the end of the turn.
+function battle:residual(instance)
+  local damage, message = status.residual(instance)
+  if damage <= 0 then
+    return
+  end
+
+  instance.hp = math.max(0, instance.hp - damage)
+  self:say("%s %s", self:name_of(instance), message)
+
+  if instance.hp <= 0 then
+    self:say("%s fainted!", self:name_of(instance))
+    self.over = true
+    self.winner = (instance == self.player) and "opponent" or "player"
   end
 end
 
@@ -196,6 +289,13 @@ function battle:turn(player_move, opponent_move, options)
     if not self.over then
       local defender = actor.side == "player" and self.opponent or self.player
       self:strike(actor.pokemon, defender, actor.move, options)
+    end
+  end
+
+  -- End of turn, in the same order the sides acted.
+  for _, actor in ipairs { first, second } do
+    if not self.over then
+      self:residual(actor.pokemon)
     end
   end
 

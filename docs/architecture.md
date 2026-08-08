@@ -525,3 +525,35 @@ since.
 
 A save whose `format_version` does not match is refused rather than
 half-interpreted, the same rule the cache uses.
+
+## Status and stat stages
+
+Stat stages are a table, not a formula, and that is the point. The multipliers
+are **not symmetric**: +1 is 150% but -1 is 66%, not 75%. Anyone deriving them
+from `1 + n/2` gets the whole negative half subtly wrong, so the table is
+transcribed and the asymmetry is asserted.
+
+Two status effects deliberately sit outside the stage system. Burn halves attack
+and paralysis quarters speed, and the game applies both where the stat is read
+rather than as stages — so they stack with stages instead of competing with
+them, and clearing the status restores the stat exactly.
+
+Paralysis affecting speed is what makes it change *turn order*, not just how
+often a Pokémon acts. That is easy to miss if speed is read raw when deciding
+who goes first, and the test for it puts a paralysed Pokémon against an
+identical unparalysed one.
+
+Stages are per battle and are discarded when it ends. Status is not: it
+persists, which is why it belongs on the Pokémon and gets saved.
+
+### Effects that always happen, and effects that ride along
+
+The move effect byte distinguishes these and the distinction matters. A plain
+effect is the move's whole purpose and always applies — Thunder Wave only
+paralyses. A `_HIT` effect accompanies damage and fires on the move's effect
+chance, which is out of 255 rather than 100.
+
+`src/engine/move_effects.lua` covers the status and stat-stage effects and
+reports anything else as unmodelled rather than silently doing nothing. Most of
+the hundred-odd effect values — multi-hit, recoil, drain, one-hit knockouts,
+weather, protection, the many one-move specials — are still absent.

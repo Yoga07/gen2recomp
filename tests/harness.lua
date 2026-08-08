@@ -1493,6 +1493,147 @@ local function test_save(base_stats)
   check("the save can be removed", not save.exists(game_id))
 end
 
+--- Status conditions and stat stages.
+local function test_status(base_stats, move_records)
+  log("\n== status and stages ==")
+  if not base_stats or not move_records then
+    log("  SKIP  base stats or moves were not located")
+    return
+  end
+
+  local stages = require("src.engine.stages")
+  local status = require("src.engine.status")
+  local battle = require("src.engine.battle")
+  local pokemon = require("src.engine.pokemon")
+  local stats = base_stats.records
+  local moves = move_records.records
+
+  -- The multipliers are not symmetric, which is the thing a formula gets wrong.
+  check_equal("+1 is 150%", stages.apply(100, 1), 150)
+  check_equal("-1 is 66%, not 75%", stages.apply(100, -1), 66)
+  check_equal("+6 quadruples", stages.apply(100, 6), 400)
+  check_equal("-6 quarters", stages.apply(100, -6), 25)
+  check_equal("stage 0 changes nothing", stages.apply(100, 0), 100)
+
+  -- Stages clamp rather than run away.
+  local set = stages.new()
+  for _ = 1, 10 do
+    stages.shift(set, "attack", 1)
+  end
+  check_equal("stages clamp at +6", set.attack, stages.MAX)
+  local _, moved = stages.shift(set, "attack", 1)
+  check("a clamped stage reports it did not move", not moved)
+
+  -- Burn halves attack and paralysis quarters speed, outside the stage system.
+  local burned = pokemon.new(155, stats[155], { level = 20 })
+  check_equal("a healthy Pokémon has no attack penalty",
+    status.attack_factor(burned), 1)
+  status.apply(burned, status.BURN)
+  check_equal("burn halves attack", status.attack_factor(burned), 0.5)
+  status.clear(burned)
+  status.apply(burned, status.PARALYSIS)
+  check_equal("paralysis quarters speed", status.speed_factor(burned), 0.25)
+
+  -- Only one status at a time.
+  status.clear(burned)
+  check("a status applies to a healthy Pokémon",
+    status.apply(burned, status.POISON))
+  check("a second status does not stack",
+    not status.apply(burned, status.BURN))
+  check_equal("the first status is kept", burned.status, status.POISON)
+
+  -- Residual damage is a fraction of maximum health, and toxic climbs.
+  local poisoned = pokemon.new(242, stats[242], { level = 50 })
+  status.apply(poisoned, status.POISON)
+  local tick = status.residual(poisoned)
+  check_equal("poison costs an eighth of maximum HP",
+    tick, math.floor(poisoned.stats.hp / 8))
+
+  local toxined = pokemon.new(242, stats[242], { level = 50 })
+  status.apply(toxined, status.TOXIC)
+  local first_tick = status.residual(toxined)
+  local second_tick = status.residual(toxined)
+  check("toxic damage climbs", second_tick > first_tick,
+    ("%d then %d"):format(first_tick, second_tick))
+
+  -- Sleep expires; freeze does not, on its own.
+  local sleeper = pokemon.new(155, stats[155], { level = 20 })
+  status.apply(sleeper, status.SLEEP, function() return 2 end)
+  local acting = status.can_act(sleeper)
+  check("a sleeping Pokémon cannot act", not acting)
+  status.can_act(sleeper)
+  check("sleep wears off", sleeper.status == nil)
+
+  local frozen = pokemon.new(155, stats[155], { level = 20 })
+  status.apply(frozen, status.FREEZE)
+  status.can_act(frozen)
+  status.can_act(frozen)
+  check("freeze does not wear off by itself", frozen.status == status.FREEZE)
+  check("a fire move thaws it", status.thaw_on_hit(frozen, "fire"))
+  check("and the freeze is gone", frozen.status == nil)
+
+  -- Paralysis changes who goes first, which is the point of it.
+  -- Identical DVs, or the two are not actually the same speed and the coin
+  -- never gets consulted.
+  local same = { attack = 8, defense = 8, speed = 8, special = 8 }
+  local quick = pokemon.new(25, stats[25], { level = 50, dvs = same })
+  local slow = pokemon.new(25, stats[25], { level = 50, dvs = same })
+  local first = battle.order(
+    { pokemon = quick, side = "a" }, { pokemon = slow, side = "b" }, 0)
+  check_equal("equal speeds break by the coin", first.side, "a")
+
+  status.apply(quick, status.PARALYSIS)
+  local now_first = battle.order(
+    { pokemon = quick, side = "a" }, { pokemon = slow, side = "b" }, 0)
+  check_equal("paralysis loses the speed race", now_first.side, "b")
+
+  -- A staged attack really does more damage.
+  local attacker = pokemon.new(155, stats[155], { level = 30 })
+  local defender = pokemon.new(19, stats[19], { level = 30 })
+  attacker.stages = stages.new()
+  defender.stages = stages.new()
+
+  local move = { power = 60, type = "normal", accuracy = 255 }
+  local plain = battle.damage(attacker, defender, move,
+    { crit = false, spread = battle.SPREAD_HIGH })
+  attacker.stages.attack = 2
+  local boosted = battle.damage(attacker, defender, move,
+    { crit = false, spread = battle.SPREAD_HIGH })
+  check("raising attack raises damage", boosted > plain,
+    ("%d vs %d"):format(boosted, plain))
+
+  attacker.stages.attack = 0
+  defender.stages.defense = 2
+  local resisted = battle.damage(attacker, defender, move,
+    { crit = false, spread = battle.SPREAD_HIGH })
+  check("raising defence lowers damage", resisted < plain,
+    ("%d vs %d"):format(resisted, plain))
+
+  -- And a real move with a real effect byte lands its status.
+  local effects = require("src.engine.move_effects")
+  local thunder_wave
+  for id, record in ipairs(moves) do
+    if effects.lookup(record.effect)
+      and effects.lookup(record.effect).status == status.PARALYSIS
+      and effects.lookup(record.effect).always then
+      thunder_wave = id
+      break
+    end
+  end
+  check("the cartridge has a move that always paralyses", thunder_wave ~= nil)
+
+  if thunder_wave then
+    local fight = battle.new(
+      pokemon.new(25, stats[25], { level = 30 }),
+      pokemon.new(19, stats[19], { level = 30 }),
+      moves, {}, {})
+    fight:strike(fight.player, fight.opponent, thunder_wave,
+      { crit = false, spread = battle.SPREAD_HIGH, effect_roll = 0 })
+    check_equal("it paralyses the target", fight.opponent.status,
+      status.PARALYSIS)
+  end
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1749,6 +1890,7 @@ function harness.run(rom_path, report_path)
       found and found.move_names and found.move_names.records)
     test_catching(found and found.base_stats)
     test_save(found and found.base_stats)
+    test_status(found and found.base_stats, found and found.moves)
     test_battle(found and found.base_stats, found and found.moves,
       found and found.species_names and found.species_names.records,
       found and found.move_names and found.move_names.records)
