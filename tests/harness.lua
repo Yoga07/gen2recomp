@@ -1634,6 +1634,63 @@ local function test_status(base_stats, move_records)
   end
 end
 
+--- The menu widget: cursor, wrapping, and the scroll window.
+local function test_menu()
+  log("\n== menus ==")
+  local menu = require("src.engine.menu")
+
+  local list = menu.new({ "A", "B", "C" }, 3)
+  check_equal("a new list starts on the first item", list:selected(), "A")
+
+  list:move(1)
+  check_equal("down moves to the next", list:selected(), "B")
+
+  list:move(-1)
+  list:move(-1)
+  check_equal("up from the first wraps to the last", list:selected(), "C")
+
+  list:move(1)
+  check_equal("down from the last wraps to the first", list:selected(), "A")
+
+  -- An empty list must not crash or select anything.
+  local empty = menu.new({}, 4)
+  check("an empty list reports itself empty", empty:is_empty())
+  empty:move(1)
+  check("moving in an empty list selects nothing", empty:selected() == nil)
+  check_equal("an empty list has no rows", #empty:window(), 0)
+
+  -- The scroll window: six items, three visible.
+  local long = menu.new({ 1, 2, 3, 4, 5, 6 }, 3)
+  check_equal("only the visible rows are returned", #long:window(), 3)
+  check_equal("the window starts at the top", long:window()[1].index, 1)
+
+  long:move(1)
+  long:move(1)
+  check_equal("the window does not scroll until it must",
+    long:window()[1].index, 1)
+
+  long:move(1)
+  check_equal("the window follows the cursor down", long:window()[1].index, 2)
+  check_equal("the cursor is the last visible row",
+    long:window()[3].index, long.cursor)
+
+  -- Wrapping from the end has to jump the window, not nudge it.
+  long.cursor = 6
+  long.offset = 3
+  long:move(1)
+  check_equal("wrapping to the top resets the window", long:window()[1].index, 1)
+  check_equal("and selects the first item", long.cursor, 1)
+
+  -- Exactly one row is ever marked selected.
+  local marked = 0
+  for _, row in ipairs(long:window()) do
+    if row.selected then
+      marked = marked + 1
+    end
+  end
+  check_equal("exactly one row is selected", marked, 1)
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1891,6 +1948,7 @@ function harness.run(rom_path, report_path)
     test_catching(found and found.base_stats)
     test_save(found and found.base_stats)
     test_status(found and found.base_stats, found and found.moves)
+    test_menu()
     test_battle(found and found.base_stats, found and found.moves,
       found and found.species_names and found.species_names.records,
       found and found.move_names and found.move_names.records)

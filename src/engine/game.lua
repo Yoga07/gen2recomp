@@ -12,6 +12,8 @@ local pokemon = require("src.engine.pokemon")
 local battle = require("src.engine.battle")
 local catching = require("src.engine.catching")
 local save = require("src.engine.save")
+local menu = require("src.engine.menu")
+local stages = require("src.engine.stages")
 
 local game = {}
 game.__index = game
@@ -206,6 +208,20 @@ end
 -- Used by the screenshot mode to exercise the whole path from collision
 -- classification through the encounter tables to the text box.
 -- @param demo "catch" to throw a ball immediately, otherwise open the menu
+--- Catch something, then open the party summary on it.
+-- Used by the screenshot mode to show the menus with real contents.
+function game:show_party_demo()
+  self:show_first_encounter("catch")
+  self.battle = nil
+  self.battle_lines = nil
+  self:party_leader()
+  self:open_party()
+  self.ui.list:move(1)
+  self:menu_confirm()
+  return true
+end
+
+-- @param demo "catch" to throw a ball immediately, otherwise open the menu
 function game:show_first_encounter(demo)
   for index = 1, self.world:map_count() do
     local map = self.world:map(index)
@@ -264,6 +280,204 @@ function game:notify(text)
   self.message_timer = 2.5
 end
 
+--------------------------------------------------------------------------------
+-- Menus
+--------------------------------------------------------------------------------
+
+game.START_ENTRIES = { "POKEMON", "SAVE", "CLOSE" }
+
+--- Open the start menu, unless something else already owns the screen.
+function game:open_menu()
+  if self.battle or self.dialogue or self.player.moving then
+    return
+  end
+  self.ui = { kind = "start", list = menu.new(game.START_ENTRIES, 3) }
+end
+
+function game:close_menu()
+  self.ui = nil
+end
+
+--- Short label for a party member, as the party list shows it.
+function game:party_label(member)
+  local name = self.species_names[member.species] or "?"
+  local mark = ""
+  if member.status then
+    -- Three letters is all that fits beside the numbers.
+    mark = " " .. member.status:upper():sub(1, 3)
+  end
+  return ("%s L%d %d/%d%s"):format(name:sub(1, 9), member.level,
+    member.hp, member.stats.hp, mark)
+end
+
+--- Handle a key while a menu is open.
+-- @return true when the key was consumed
+function game:menu_key(key)
+  if not self.ui then
+    return false
+  end
+
+  if key == "up" or key == "w" then
+    self.ui.list:move(-1)
+    return true
+  end
+
+  if key == "down" or key == "s" then
+    self.ui.list:move(1)
+    return true
+  end
+
+  if key == "x" or key == "escape" or key == "backspace" then
+    -- Step back one screen rather than closing everything at once.
+    if self.ui.kind == "summary" then
+      self:open_party()
+    elseif self.ui.kind == "party" then
+      self.ui = { kind = "start", list = menu.new(game.START_ENTRIES, 3) }
+    else
+      self:close_menu()
+    end
+    return true
+  end
+
+  if key == "z" or key == "space" or key == "return" then
+    self:menu_confirm()
+    return true
+  end
+
+  return false
+end
+
+function game:open_party()
+  local party = self.party or {}
+  local labels = {}
+  for index, member in ipairs(party) do
+    labels[index] = self:party_label(member)
+  end
+  self.ui = { kind = "party", list = menu.new(labels, 6) }
+end
+
+function game:menu_confirm()
+  local kind = self.ui.kind
+
+  if kind == "start" then
+    local choice = self.ui.list:selected()
+    if choice == "POKEMON" then
+      self:party_leader() -- makes sure the starter exists before listing
+      self:open_party()
+    elseif choice == "SAVE" then
+      self:save()
+      self:close_menu()
+    else
+      self:close_menu()
+    end
+    return
+  end
+
+  if kind == "party" then
+    local index = self.ui.list.cursor
+    local member = (self.party or {})[index]
+    if member then
+      self.ui = { kind = "summary", index = index,
+                  list = menu.new({ "" }, 1) }
+    end
+    return
+  end
+
+  -- The summary has nothing to confirm; treat it as a step back.
+  self:open_party()
+end
+
+--- Draw whichever menu is open, inside the hardware-sized canvas.
+function game:draw_menu()
+  local font = self.bitmap_font
+  if not font then
+    return
+  end
+
+  local kind = self.ui.kind
+
+  if kind == "summary" then
+    local member = (self.party or {})[self.ui.index]
+    if not member then
+      return
+    end
+
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", 0, 0, game.SCREEN_WIDTH, game.SCREEN_HEIGHT)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", 2.5, 2.5,
+      game.SCREEN_WIDTH - 5, game.SCREEN_HEIGHT - 5)
+
+    local sprite = self.world:species_sprite(member.species)
+    if sprite then
+      love.graphics.setColor(1, 1, 1)
+      love.graphics.draw(sprite, game.SCREEN_WIDTH - sprite:getWidth() - 6, 6)
+    end
+
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    local name = self.species_names[member.species] or "?"
+    local lines = {
+      name,
+      ("L%d  %s"):format(member.level, member.gender or ""),
+      ("HP %d/%d"):format(member.hp, member.stats.hp),
+      -- SATK and SDEF rather than SPA/SPD, so neither can be mistaken for
+      -- speed, which gets SPD to itself.
+      ("ATK %d  DEF %d"):format(member.stats.attack, member.stats.defense),
+      ("SATK %d  SDEF %d"):format(member.stats.special_attack,
+        member.stats.special_defense),
+      ("SPD %d"):format(member.stats.speed),
+      member.types[1] == member.types[2] and member.types[1]
+        or ("%s/%s"):format(member.types[1] or "?", member.types[2] or "?"),
+      member.status and ("STATUS " .. member.status:upper()) or "",
+      member.shiny and "SHINY" or "",
+    }
+
+    for i, line in ipairs(lines) do
+      if line ~= "" then
+        font:draw_codes(self:encode(line:upper()), 8, 8 + (i - 1) * 10)
+      end
+    end
+
+    -- Moves along the bottom.
+    local y = 8 + #lines * 10
+    for _, move_id in ipairs(member.moves or {}) do
+      local move_name = (self.move_name_records or {})[move_id]
+        or ("MOVE " .. move_id)
+      font:draw_codes(self:encode(move_name), 8, y)
+      y = y + 10
+    end
+
+    love.graphics.setColor(1, 1, 1)
+    return
+  end
+
+  -- Start menu and party list share a box on the right.
+  local rows = self.ui.list:window()
+  local width = kind == "party" and game.SCREEN_WIDTH or 76
+  local height = math.max(#rows, 1) * 12 + 12
+  local x = kind == "party" and 0 or (game.SCREEN_WIDTH - width)
+
+  love.graphics.setColor(1, 1, 1)
+  love.graphics.rectangle("fill", x, 0, width, height)
+  love.graphics.setColor(0.1, 0.1, 0.1)
+  love.graphics.rectangle("line", x + 2.5, 2.5, width - 5, height - 5)
+
+  if self.ui.list:is_empty() then
+    font:draw_codes(self:encode("NO POKEMON"), x + 14, 10)
+  end
+
+  for position, row in ipairs(rows) do
+    local y = 8 + (position - 1) * 12
+    font:draw_codes(self:encode(tostring(row.item)), x + 14, y)
+    if row.selected then
+      love.graphics.setColor(0.1, 0.1, 0.1)
+      love.graphics.rectangle("fill", x + 6, y + 2, 5, 5)
+    end
+  end
+
+  love.graphics.setColor(1, 1, 1)
+end
+
 --- What the player is facing, if it has something to say.
 -- @return pages, kind
 function game:facing_text()
@@ -312,8 +526,8 @@ function game:interact()
 end
 
 function game:update(dt)
-  -- Movement stops while a battle or a text box is up.
-  if self.battle or self.dialogue then
+  -- Movement stops while a battle, a text box or a menu is up.
+  if self.battle or self.dialogue or self.ui then
     return
   end
 
@@ -794,6 +1008,12 @@ function game:draw(scale)
         game.SCREEN_HEIGHT - 10, 4, 4)
     end
     love.graphics.setColor(1, 1, 1)
+  end
+
+  -- Menus sit over the overworld, so the world stays visible behind the
+  -- start menu the way it does in the original.
+  if self.ui then
+    self:draw_menu()
   end
 
   love.graphics.setCanvas()

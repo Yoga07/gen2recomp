@@ -132,7 +132,8 @@ function love.load(args)
         map_index = tonumber(args[i + 2]),
         sign = (args[i + 2] == "sign" or args[i + 2] == "npc"
           or args[i + 2] == "grass" or args[i + 2] == "catch"
-          or args[i + 2] == "catchsave") and args[i + 2] or nil,
+          or args[i + 2] == "catchsave" or args[i + 2] == "party"
+          or args[i + 2] == "menu") and args[i + 2] or nil,
         frames = 2,
       }
     end
@@ -149,7 +150,11 @@ function love.load(args)
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
     end
-    if state.shot and (state.shot.sign == "grass" or state.shot.sign == "catch"
+    if state.shot and state.shot.sign == "party" then
+      state.game:show_party_demo()
+    elseif state.shot and state.shot.sign == "menu" then
+      state.game:open_menu()
+    elseif state.shot and (state.shot.sign == "grass" or state.shot.sign == "catch"
       or state.shot.sign == "catchsave") then
       state.game:show_first_encounter(state.shot.sign)
     elseif state.shot and state.shot.sign then
@@ -205,7 +210,14 @@ end
 
 function love.keypressed(key)
   if state.screen == "playing" then
-    if key == "z" or key == "space" or key == "return" then
+    -- A menu takes every key it recognises before anything else sees it.
+    if state.game.ui and state.game:menu_key(key) then
+      return
+    end
+
+    if key == "x" and not state.game.battle and not state.game.dialogue then
+      state.game:open_menu()
+    elseif key == "z" or key == "space" or key == "return" then
       state.game:interact()
     elseif state.game.battle and (key == "up" or key == "w") then
       state.game:battle_menu_move(-1)
