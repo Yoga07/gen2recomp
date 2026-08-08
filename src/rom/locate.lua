@@ -14,6 +14,7 @@
 
 local structs = require("src.rom.structs")
 local text = require("src.rom.text")
+local items = require("src.rom.items")
 
 local locate = {}
 
@@ -112,6 +113,71 @@ locate.descriptors = {
       [2] = "KARATE CHOP",
       [165] = "STRUGGLE",
       [251] = "BEAT UP",
+    },
+  },
+
+  -- Item names carry substitution codes: item 5 is stored as $54 then " BALL",
+  -- the $54 being the one glyph that reads POKe. A validator that only accepts
+  -- charmap bytes rejects the table at its fifth record.
+  item_names = {
+    name = "item_names",
+    count = items.COUNT,
+    variable_length = true,
+    max_record_size = items.NAME_MAX,
+    signature = encode_name("MASTER BALL", 11) .. string.char(text.TERMINATOR),
+    validate_record = function(data, offset)
+      return text.is_plausible_terminated(data, offset, items.NAME_MAX, true)
+    end,
+    decode_record = function(data, offset)
+      return text.decode_terminated(data, offset, items.NAME_MAX, true)
+    end,
+    spot_checks = {
+      [5] = "POKé BALL",
+      [18] = "POTION",
+      [191] = "TM01",
+      [249] = "HM07",
+    },
+  },
+
+  -- The attributes have no text to anchor to, so the signature is the Master
+  -- Ball's own record: free, no held effect, no parameter, cannot be
+  -- registered, ball pocket, usable only in battle. The prices are what
+  -- confirm it, and they are held back from the signature so they are evidence
+  -- rather than part of the fit -- a stride-7 search on four known prices
+  -- matched this offset and nothing else, at any stride from 5 to 10.
+  item_attributes = {
+    name = "item_attributes",
+    count = items.COUNT,
+    record_size = items.RECORD_SIZE,
+    signature = string.char(0x00, 0x00, 0x00, 0x00, 0x40, 0x03, 0x06),
+    validate_record = items.plausible,
+    decode_record = items.decode,
+    spot_checks = {
+      [5] = function(record)
+        -- POKe BALL: 200, ball pocket, thrown in battle and useless outside.
+        return record.price == 200 and record.pocket == "balls"
+          and record.battle_use == "ball" and record.field_use == "none"
+      end,
+      [18] = function(record)
+        -- POTION: 300, restores 20 HP, usable in the field and in battle.
+        return record.price == 300 and record.parameter == 20
+          and record.field_use == "heal" and record.battle_use == "heal"
+      end,
+      [32] = function(record)
+        -- RARE CANDY: 4800 and not a ball.
+        return record.price == 4800 and record.pocket == "items"
+      end,
+      [7] = function(record)
+        -- BICYCLE: the registerable key item. It is the one that shows the
+        -- property bits are not all the same value.
+        return record.pocket == "key" and record.selectable
+          and not record.tossable
+      end,
+      [243] = function(record)
+        -- HM01 cannot be tossed or registered, and lives with the machines.
+        return record.pocket == "machines" and not record.tossable
+          and not record.selectable
+      end,
     },
   },
 

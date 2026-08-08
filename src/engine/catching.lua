@@ -26,6 +26,26 @@ catching.balls = {
   master = { name = "MASTER BALL", guaranteed = true },
 }
 
+--- Which multiplier a ball uses, worked out from its name.
+--
+-- The bag holds item ids, and those ids are the same in Gold, Silver and
+-- Crystal, but reading the name keeps this working off what the cartridge
+-- actually says rather than a list of numbers written down here. Balls with
+-- conditional rules -- Heavy, Level, Lure, Fast, Love, Moon -- fall through to
+-- the plain multiplier, which is what they are worth when their condition is
+-- not met.
+function catching.kind_for_name(name)
+  name = tostring(name or ""):upper()
+  if name:find("MASTER", 1, true) then
+    return "master"
+  elseif name:find("ULTRA", 1, true) then
+    return "ultra"
+  elseif name:find("GREAT", 1, true) then
+    return "great"
+  end
+  return "poke"
+end
+
 catching.SLEEP_FREEZE_BONUS = 10
 catching.OTHER_BONUS = 5
 

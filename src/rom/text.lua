@@ -234,7 +234,10 @@ end
 -- so reading them needs the length back as well as the text.
 -- @return decoded string, bytes consumed including the terminator, or nil when
 --         no terminator appears within `max_length`.
-function text.decode_terminated(data, offset, max_length)
+-- @param substitutions when true, the codes the text engine expands are
+--        resolved as well. Item names need this: item 5 is stored as $54 then
+--        " BALL", the $54 being the single glyph that reads POKe.
+function text.decode_terminated(data, offset, max_length, substitutions)
   max_length = max_length or 32
   local out = {}
   for i = 0, max_length - 1 do
@@ -245,14 +248,16 @@ function text.decode_terminated(data, offset, max_length)
     if code == text.TERMINATOR then
       return table.concat(out), i + 1
     end
-    out[#out + 1] = charmap[code] or ("<%02X>"):format(code)
+    out[#out + 1] = charmap[code]
+      or (substitutions and text.substitutions[code])
+      or ("<%02X>"):format(code)
   end
   return nil
 end
 
 --- True when a terminated string is made entirely of mapped glyphs.
 -- @return ok, bytes consumed
-function text.is_plausible_terminated(data, offset, max_length)
+function text.is_plausible_terminated(data, offset, max_length, substitutions)
   max_length = max_length or 32
   local letters = 0
   for i = 0, max_length - 1 do
@@ -263,7 +268,8 @@ function text.is_plausible_terminated(data, offset, max_length)
     if code == text.TERMINATOR then
       return letters > 0, i + 1
     end
-    if not charmap[code] then
+    if not charmap[code]
+      and not (substitutions and text.substitutions[code]) then
       return false
     end
     letters = letters + 1

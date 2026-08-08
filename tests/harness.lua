@@ -1634,7 +1634,125 @@ local function test_status(base_stats, move_records)
   end
 end
 
---- The menu widget: cursor, wrapping, and the scroll window.
+--- Items: the attribute table read off the cartridge, and the bag built on it.
+local function test_items(attributes, names)
+  log("\n== items ==")
+
+  local item_data = require("src.rom.items")
+  local bag = require("src.engine.bag")
+  local catching = require("src.engine.catching")
+
+  if not check("item attributes were located", attributes ~= nil) then
+    return
+  end
+  if not check("item names were located", names ~= nil) then
+    return
+  end
+
+  check_equal("255 items have attributes", #attributes, item_data.COUNT)
+  check_equal("255 items have names", #names, item_data.COUNT)
+
+  -- Names carry substitution codes, and item 5 is the one that proves it: it
+  -- is stored as $54 then " BALL", the $54 being the glyph that reads POKe.
+  check_equal("item 5 is the POKe BALL", names[5], "POKé BALL")
+  check_equal("item 1 is the MASTER BALL", names[1], "MASTER BALL")
+  check_equal("the machines are named in order", names[191], "TM01")
+  check_equal("and run to HM07", names[249], "HM07")
+
+  -- Every pocket should be populated, and the numbers should look like a
+  -- Pokemon game rather than like a table that happened to validate.
+  local by_pocket = {}
+  for _, record in ipairs(attributes) do
+    by_pocket[record.pocket] = (by_pocket[record.pocket] or 0) + 1
+  end
+  local shape = {}
+  for pocket, count in pairs(by_pocket) do
+    shape[#shape + 1] = ("%s %d"):format(pocket, count)
+  end
+  table.sort(shape)
+  log("        %s", table.concat(shape, ", "))
+
+  check("every pocket is used", by_pocket.items and by_pocket.balls
+    and by_pocket.key and by_pocket.machines)
+  -- 50 TMs plus 7 HMs, and nothing else lives in that pocket.
+  check_equal("the machine pocket holds the 57 TMs and HMs",
+    by_pocket.machines, 57)
+  check("the balls are a dozen or so", by_pocket.balls >= 10
+    and by_pocket.balls <= 16, ("%d"):format(by_pocket.balls))
+
+  -- Prices held back from the search, checked again here against the decoded
+  -- records rather than the raw bytes.
+  check_equal("a POTION costs 300", attributes[18].price, 300)
+  check_equal("and restores 20 HP", attributes[18].parameter, 20)
+  check_equal("a MAX POTION restores everything it can hold",
+    attributes[15].parameter, 255)
+  check_equal("the MASTER BALL is free", attributes[1].price, 0)
+
+  -- The property bits, which is where the field is easiest to get backwards.
+  check("the BICYCLE can be registered but not tossed",
+    attributes[7].selectable and not attributes[7].tossable)
+  check("a POTION can be tossed but not registered",
+    attributes[18].tossable and not attributes[18].selectable)
+
+  -- Balls are identified by their pocket, not by name, which is what keeps the
+  -- Heavy, Level and Friend balls working without being listed anywhere.
+  local ball_names = {}
+  for index, record in ipairs(attributes) do
+    if item_data.is_ball(record) then
+      ball_names[#ball_names + 1] = names[index]
+    end
+  end
+  local ball_list = table.concat(ball_names, ", ")
+  log("        balls: %s", ball_list)
+  check("the odd balls come along by pocket, not by name",
+    ball_list:find("HEAVY BALL", 1, true) ~= nil
+    and ball_list:find("FRIEND BALL", 1, true) ~= nil)
+
+  -- Which multiplier each ball uses is worked out from its name.
+  check_equal("the MASTER BALL is recognised",
+    catching.kind_for_name(names[1]), "master")
+  check_equal("the ULTRA BALL is recognised",
+    catching.kind_for_name(names[2]), "ultra")
+  check_equal("the GREAT BALL is recognised",
+    catching.kind_for_name(names[4]), "great")
+  check_equal("the POKe BALL is the plain one",
+    catching.kind_for_name(names[5]), "poke")
+  check_equal("an odd ball falls back to the plain multiplier",
+    catching.kind_for_name(names[157]), "poke")
+
+  -- The bag itself.
+  local held = bag.new(attributes, names)
+  held:add(5, 5)
+  held:add(18, 3)
+  held:add(7, 1)
+  check_equal("items land in the pocket the cartridge names",
+    held:pocket_of(5), "balls")
+  check_equal("the ball pocket holds one kind", #held:pocket("balls"), 1)
+  check_equal("the item pocket holds the potion", #held:pocket("items"), 1)
+  check_equal("the key pocket holds the bicycle", #held:pocket("key"), 1)
+  check_equal("empty pockets are left out", #held:used_pockets(), 3)
+
+  check_equal("the first ball is what a battle reaches for",
+    held:first_ball().item, 5)
+
+  -- Stacks cap at 99, and the return says how many were actually taken.
+  check_equal("adding past the cap takes only what fits",
+    held:add(18, 200), 96)
+  check_equal("and the stack stops at 99", held:count(18), 99)
+
+  check("removing more than is held fails", not held:remove(9, 1))
+  check("removing what is held works", held:remove(5, 5))
+  check_equal("an emptied stack leaves the pocket", held:count(5), 0)
+  check_equal("and the pocket with it", #held:used_pockets(), 2)
+
+  -- Round trip through the save.
+  local restored = bag.from_list(attributes, names, held:to_list())
+  check_equal("the bag survives a save", restored:count(18), 99)
+  check_equal("and keeps its key items", restored:count(7), 1)
+  check_equal("and does not invent any", restored:total(), held:total())
+end
+
+-- The menu widget: cursor, wrapping, and the scroll window.
 local function test_menu()
   log("\n== menus ==")
   local menu = require("src.engine.menu")
@@ -2224,6 +2342,8 @@ function harness.run(rom_path, report_path)
     test_save(found and found.base_stats)
     test_status(found and found.base_stats, found and found.moves)
     test_menu()
+    test_items(found and found.item_attributes and found.item_attributes.records,
+      found and found.item_names and found.item_names.records)
     test_trainer_objects(rom, map_result,
       found and found.species_names and found.species_names.records)
     test_battle(found and found.base_stats, found and found.moves,

@@ -651,3 +651,61 @@ non-resolving object as not a trainer, so these start no battle.
 
 The tests assert this as a floor, so the number can be improved but cannot
 quietly get worse.
+
+## Items
+
+Two tables, found in different ways because they offer different holds.
+
+The names are text, so they go the way the move names went: "MASTER BALL" is
+always item 1, and the names are packed with the terminator between them rather
+than padded. It occurs once in the cartridge, at 0x1C8000, and 255 names read
+out of it before the run stops on a byte that is not a character.
+
+One thing had to change to read them. Item 5 is not stored as "POKE BALL" but
+as `$54` followed by " BALL", `$54` being the single glyph that draws POKe — the
+same substitution code the dialogue engine expands. The name validator only
+accepted charmap bytes, so it rejected the table at its fifth record. Both the
+validator and the decoder now take a flag for whether substitutions count as
+characters, which is off for everything except item names.
+
+### Finding a table with no text in it
+
+The attributes have nothing to search for, so the anchor is the prices. Master
+Ball is free, Ultra Ball is 1200, Great Ball 600 and Poke Ball 200, and those
+four sit at known distances from each other. Searching for all four at once, at
+every stride from 5 to 10, gives exactly one hit: stride 7 at 0x0067C1. Every
+other stride gives nothing at all.
+
+Five more prices were held back from the search and checked afterwards —
+Antidote, Full Restore, Potion, Rare Candy, Full Heal — and all five land. They
+are evidence precisely because they took no part in the fit.
+
+### Reading the fields off the data
+
+The seven bytes are price, held effect, parameter, property, pocket, menu. That
+order was read off the cartridge rather than assumed, by dumping items whose
+pocket is not in doubt and looking for the column where they disagree:
+
+- **byte 5** takes only the values 1 to 4 across all 255 items, and a ball, a
+  potion, a bicycle and a TM each take a different one. That is the pocket.
+- **byte 3** is 20 for Potion and 10 for Berry, which is how much HP each
+  restores. The parameter identifies itself.
+- **byte 4** is only ever `00`, `40`, `80` or `C0`. The Bicycle is `$80` and the
+  HMs are `$C0`, which fits registerable-but-untossable and neither.
+- **byte 6** splits into two nibbles: balls are `$06`, usable in battle and
+  useless outside, while a Potion is `$55`, usable in both.
+
+Nothing in the engine is keyed on an item id. A Super Potion heals more than a
+Potion because the cartridge says 60 against 20, and the pocket listing puts the
+Heavy, Level, Lure, Fast, Friend, Moon, Love and Park balls with the other balls
+without any of them being named in the code. Which multiplier a ball uses is the
+one place a name is read, and only to tell Master, Ultra and Great from the
+rest; the conditional balls fall through to the plain multiplier, which is what
+they are worth when their condition is not met.
+
+### What is not there yet
+
+The scripts that hand out items are not interpreted, so the starting bag is a
+stand-in written in the engine rather than something the cartridge granted. Item
+balls lying on the ground are objects the event decoder already sees but does
+not yet turn into pickups, and the mart inventories have not been located.

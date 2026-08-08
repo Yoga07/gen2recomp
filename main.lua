@@ -28,6 +28,7 @@ local HEADLESS = {
   ["--probe-battle-data"] = "tests.probe_battle_data",
   ["--probe-trainers"] = "tests.probe_trainers",
   ["--probe-party-validator"] = "tests.probe_party_validator",
+  ["--probe-items"] = "tests.probe_items",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }
@@ -137,7 +138,8 @@ function love.load(args)
           or args[i + 2] == "grass" or args[i + 2] == "catch"
           or args[i + 2] == "catchsave" or args[i + 2] == "party"
           or args[i + 2] == "menu" or args[i + 2] == "connection"
-          or args[i + 2] == "trainer")
+          or args[i + 2] == "trainer" or args[i + 2] == "bag"
+          or args[i + 2] == "pocket" or args[i + 2] == "balls")
           and args[i + 2] or nil,
         frames = 2,
       }
@@ -155,7 +157,13 @@ function love.load(args)
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
     end
-    if state.shot and state.shot.sign == "trainer" then
+    if state.shot and state.shot.sign == "balls" then
+      state.game:open_pocket("balls")
+    elseif state.shot and state.shot.sign == "pocket" then
+      state.game:open_pocket("items")
+    elseif state.shot and state.shot.sign == "bag" then
+      state.game:open_bag()
+    elseif state.shot and state.shot.sign == "trainer" then
       state.game:show_trainer_demo()
     elseif state.shot and state.shot.sign == "connection" then
       state.game:show_connection_demo()

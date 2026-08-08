@@ -103,6 +103,9 @@ function save.write(game, state)
       table.sort(flags)
       return flags
     end)(),
+    -- The bag, as { item, count } pairs. Only what is held is written, so an
+    -- empty bag costs nothing and a save from before items existed still reads.
+    bag = state.bag or {},
     saved_at = os.time(),
   }
 
@@ -159,6 +162,7 @@ function save.read(game, base_stats)
     facing = record.facing,
     party = party,
     beaten = beaten,
+    bag = record.bag,
     saved_at = record.saved_at,
   }
 end

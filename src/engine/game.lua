@@ -14,6 +14,7 @@ local catching = require("src.engine.catching")
 local save = require("src.engine.save")
 local menu = require("src.engine.menu")
 local stages = require("src.engine.stages")
+local bag = require("src.engine.bag")
 
 local game = {}
 game.__index = game
@@ -63,8 +64,19 @@ function game.new(game_id, start_index)
   instance.move_name_records = cache.read(game_id, "move_names")
   instance.learnset_records = cache.read(game_id, "learnsets")
   instance.trainer_classes = cache.read(game_id, "trainer_classes")
+  instance.item_records = cache.read(game_id, "item_attributes")
+  instance.item_names = cache.read(game_id, "item_names")
+  instance.bag = bag.new(instance.item_records, instance.item_names)
   -- Trainers already beaten, keyed by their event flag. Saved with the game.
   instance.beaten = {}
+
+  -- A stand-in for what the game's own scripts would hand out. Mum's potion,
+  -- the balls from the mart and a key item are enough to exercise every pocket;
+  -- the scripts that actually award items are not interpreted yet.
+  instance.bag:add(5, 5)   -- POKe BALL
+  instance.bag:add(18, 3)  -- POTION
+  instance.bag:add(9, 1)   -- ANTIDOTE
+  instance.bag:add(7, 1)   -- BICYCLE
 
   -- A save takes precedence over the default starting map.
   local restored = instance:restore()
@@ -88,6 +100,7 @@ function game:save()
     facing = self.player.facing,
     party = self.party,
     beaten = self.beaten,
+    bag = self.bag:to_list(),
   })
 
   if ok then
@@ -119,6 +132,11 @@ function game:restore()
 
   self.party = state.party
   self.beaten = state.beaten or {}
+  -- A save written before the bag existed has no list, and the starting items
+  -- set up in game.new stand rather than the bag coming back empty.
+  if state.bag then
+    self.bag = bag.from_list(self.item_records, self.item_names, state.bag)
+  end
   self:enter(state.map_index, state.cell_x, state.cell_y, state.facing)
   self:notify(("Loaded. Party: %d"):format(#state.party))
   return true
@@ -344,14 +362,23 @@ end
 -- Menus
 --------------------------------------------------------------------------------
 
-game.START_ENTRIES = { "POKEMON", "SAVE", "CLOSE" }
+game.START_ENTRIES = { "POKEMON", "BAG", "SAVE", "CLOSE" }
+
+-- What each pocket is called on screen. The cartridge names the pocket an item
+-- belongs to but not the pocket itself, so these labels are ours.
+game.POCKET_LABELS = {
+  items = "ITEMS",
+  balls = "BALLS",
+  machines = "TM/HM",
+  key = "KEY ITEMS",
+}
 
 --- Open the start menu, unless something else already owns the screen.
 function game:open_menu()
   if self.battle or self.dialogue or self.player.moving then
     return
   end
-  self.ui = { kind = "start", list = menu.new(game.START_ENTRIES, 3) }
+  self.ui = { kind = "start", list = menu.new(game.START_ENTRIES, #game.START_ENTRIES) }
 end
 
 function game:close_menu()
@@ -391,8 +418,10 @@ function game:menu_key(key)
     -- Step back one screen rather than closing everything at once.
     if self.ui.kind == "summary" then
       self:open_party()
-    elseif self.ui.kind == "party" then
-      self.ui = { kind = "start", list = menu.new(game.START_ENTRIES, 3) }
+    elseif self.ui.kind == "pocket" then
+      self:open_bag()
+    elseif self.ui.kind == "party" or self.ui.kind == "bag" then
+      self.ui = { kind = "start", list = menu.new(game.START_ENTRIES, #game.START_ENTRIES) }
     else
       self:close_menu()
     end
@@ -416,14 +445,101 @@ function game:open_party()
   self.ui = { kind = "party", list = menu.new(labels, 6) }
 end
 
+--- The pockets that currently hold something, as a menu.
+-- Empty pockets are left out rather than shown empty, which is what the games
+-- do once you have been given the bag.
+function game:open_bag()
+  local used = self.bag:used_pockets()
+  local labels = {}
+  for index, which in ipairs(used) do
+    labels[index] = ("%s %d"):format(game.POCKET_LABELS[which] or which,
+      #self.bag:pocket(which))
+  end
+  self.ui = { kind = "bag", pockets = used, list = menu.new(labels, 4) }
+end
+
+function game:open_pocket(which)
+  local contents = self.bag:pocket(which)
+  local labels = {}
+  for index, entry in ipairs(contents) do
+    -- Key items are singular, so a count beside them reads oddly.
+    if which == "key" then
+      labels[index] = entry.name
+    else
+      labels[index] = ("%s x%d"):format(entry.name, entry.count)
+    end
+  end
+  self.ui = { kind = "pocket", pocket = which, contents = contents,
+              list = menu.new(labels, 6) }
+end
+
+--- Use an item from the bag while walking around.
+--
+-- What an item does comes from its own record: the high nibble of the menu byte
+-- says whether it is usable in the field at all, and the parameter says how
+-- much. Nothing here is keyed on an item id, so a Super Potion heals more than
+-- a Potion because the cartridge says 60 against 20, not because the engine
+-- knows which is which.
+function game:use_item_in_field(entry)
+  local record = entry.record
+  local leader = self:party_leader()
+
+  if not record or record.field_use ~= "heal" then
+    self:notify(("%s has no use here."):format(entry.name))
+    return
+  end
+
+  if not leader then
+    self:notify("No POKéMON to use it on.")
+    return
+  end
+
+  if leader.hp >= leader.stats.hp then
+    self:notify(("%s is already healthy."):format(
+      self.species_names[leader.species] or "?"))
+    return
+  end
+
+  local healed = math.min(record.parameter, leader.stats.hp - leader.hp)
+  leader.hp = leader.hp + healed
+  self.bag:remove(entry.item, 1)
+  self:notify(("%s restored %d HP."):format(entry.name, healed))
+
+  -- The pocket has changed underneath the cursor, so rebuild it. An emptied
+  -- pocket drops back to the bag rather than showing an empty list.
+  if #self.bag:pocket(entry.pocket or self.ui.pocket) > 0 then
+    self:open_pocket(self.ui.pocket)
+  else
+    self:open_bag()
+  end
+end
+
 function game:menu_confirm()
   local kind = self.ui.kind
+
+  if kind == "bag" then
+    local which = self.ui.pockets[self.ui.list.cursor]
+    if which then
+      self:open_pocket(which)
+    end
+    return
+  end
+
+  if kind == "pocket" then
+    local entry = self.ui.contents[self.ui.list.cursor]
+    if entry then
+      self:use_item_in_field(entry)
+    end
+    return
+  end
 
   if kind == "start" then
     local choice = self.ui.list:selected()
     if choice == "POKEMON" then
       self:party_leader() -- makes sure the starter exists before listing
       self:open_party()
+    elseif choice == "BAG" then
+      self:open_bag()
     elseif choice == "SAVE" then
       self:save()
       self:close_menu()
@@ -513,9 +629,14 @@ function game:draw_menu()
 
   -- Start menu and party list share a box on the right.
   local rows = self.ui.list:window()
-  local width = kind == "party" and game.SCREEN_WIDTH or 76
+  -- Party rows and item rows both carry a name and a number, so they need the
+  -- full width; the short menus sit in the corner the way the games put them.
+  local wide = kind == "party" or kind == "pocket"
+  -- "KEY ITEMS" plus its count does not fit the 76 the short menus use, and a
+  -- clipped label is worse than a wider box.
+  local width = wide and game.SCREEN_WIDTH or (kind == "bag" and 112 or 76)
   local height = math.max(#rows, 1) * 12 + 12
-  local x = kind == "party" and 0 or (game.SCREEN_WIDTH - width)
+  local x = wide and 0 or (game.SCREEN_WIDTH - width)
 
   love.graphics.setColor(1, 1, 1)
   love.graphics.rectangle("fill", x, 0, width, height)
@@ -523,7 +644,9 @@ function game:draw_menu()
   love.graphics.rectangle("line", x + 2.5, 2.5, width - 5, height - 5)
 
   if self.ui.list:is_empty() then
-    font:draw_codes(self:encode("NO POKEMON"), x + 14, 10)
+    local empty = (kind == "bag" or kind == "pocket") and "NO ITEMS"
+      or "NO POKEMON"
+    font:draw_codes(self:encode(empty), x + 14, 10)
   end
 
   for position, row in ipairs(rows) do
@@ -858,9 +981,23 @@ game.BATTLE_ACTIONS = { "FIGHT", "BALL", "RUN" }
 --- Throw a ball at the wild Pokémon.
 function game:throw_ball()
   local opponent = self.battle.opponent
-  local caught, value = catching.attempt(opponent, self.battle_catch_rate, "poke")
 
-  local lines = { "Used POKé BALL!" }
+  -- The ball comes out of the bag now, so running out is a real outcome. Which
+  -- ball, and therefore which multiplier, is whichever sits first in the ball
+  -- pocket rather than an assumption that it is a plain Poke Ball.
+  local ball = self.bag:first_ball()
+  if not ball then
+    -- Costs nothing: no ball leaves the bag and the turn is not spent.
+    self.battle_lines = { "No BALLS left!" }
+    return
+  end
+
+  local kind = catching.kind_for_name(ball.name)
+  self.bag:remove(ball.item, 1)
+
+  local caught, value = catching.attempt(opponent, self.battle_catch_rate, kind)
+
+  local lines = { ("Used %s!"):format(ball.name) }
 
   if caught then
     if self:add_to_party(opponent) then
