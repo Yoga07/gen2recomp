@@ -27,6 +27,7 @@ local HEADLESS = {
   ["--probe-walker"] = "tests.probe_walker",
   ["--probe-battle-data"] = "tests.probe_battle_data",
   ["--probe-trainers"] = "tests.probe_trainers",
+  ["--probe-party-validator"] = "tests.probe_party_validator",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }

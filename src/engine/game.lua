@@ -860,7 +860,7 @@ function game:throw_ball()
   local opponent = self.battle.opponent
   local caught, value = catching.attempt(opponent, self.battle_catch_rate, "poke")
 
-  local lines = { "Threw a BALL!" }
+  local lines = { "Used POKé BALL!" }
 
   if caught then
     if self:add_to_party(opponent) then
@@ -905,12 +905,10 @@ function game:encode(str)
     local byte_value = char:byte()
 
     -- "é" is two bytes in UTF-8, so it must be matched before the single-byte
-    -- cases. It maps to $BA, which is correct for cartridge text — the
-    -- extracted dialogue decodes POKéMON properly — but tile $BA - $40 in the
-    -- font sheet is blank, so the glyph does not draw. Where the font actually
-    -- keeps the accent is unresolved; runtime strings avoid it meanwhile.
+    -- cases. It is $EA: that tile carries ink where $BA's is blank, which is
+    -- what settled where the accent actually lives.
     if byte_value == 0xC3 and str:byte(i + 1) == 0xA9 then
-      codes[#codes + 1] = 0xBA
+      codes[#codes + 1] = 0xEA
       i = i + 2
       goto continue
     end

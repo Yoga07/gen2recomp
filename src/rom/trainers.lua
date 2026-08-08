@@ -214,6 +214,13 @@ function trainers.locate_groups(rom, entries)
   -- resolve truncates the table at any single awkward entry — doing that cut
   -- Crystal off at 50 classes when classes 55 to 57 are plainly real. Several
   -- failures in a row is what actually marks the end.
+  -- The table ends at 57, and that is the whole table rather than a truncation.
+  -- Classes 58 upward were worth checking, because map objects name them and a
+  -- contiguous block like that looks like something real: the words there read
+  -- $8085, $8A8B, $848D, which are not near pointers at all but the text of the
+  -- first class's names. Parties in a later bank were ruled out the same way.
+  -- Class 57 decoding as EUSINE is the confirmation, that being the last
+  -- trainer class in the game.
   local classes = {}
   local count, misses = 0, 0
   for class = 1, trainers.MAX_CLASSES do
@@ -249,11 +256,26 @@ function trainers.party_for(rom, groups, class, id)
     return nil, ("class %d has no entry"):format(class)
   end
 
+  -- Bounded by wherever the next class begins. Without this a request for an
+  -- id past the end of its class walks into the following class and returns
+  -- somebody else's party, which is worse than failing.
+  local limit = rom.size
+  for other = class + 1, trainers.MAX_CLASSES do
+    if groups.classes[other] then
+      limit = groups.classes[other]
+      break
+    end
+  end
+
   local at = start
   for index = 1, id do
+    if at >= limit then
+      return nil, ("class %d has fewer than %d trainers"):format(class, id)
+    end
     local record, consumed = trainers.decode(rom, at)
     if not record then
-      return nil, ("class %d entry %d did not decode"):format(class, index)
+      return nil, ("class %d entry %d did not decode: %s")
+        :format(class, index, tostring(consumed))
     end
     if index == id then
       return record

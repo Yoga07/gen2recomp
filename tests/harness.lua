@@ -1759,6 +1759,58 @@ local function test_trainer_objects(rom, map_result, species_names)
   end
   log("        %d distinct trainers reachable by class and id", total_reachable)
 
+  -- The validator itself: walk every class from its first entry to wherever
+  -- the next class begins. A rejection part-way through truncates every
+  -- trainer after it, so this is the property that matters, and it is checked
+  -- at 100% rather than bounded — one bad glyph in the charmap used to cost a
+  -- whole class, and that must not be able to come back quietly.
+  local ordered = {}
+  for class, start in pairs(groups.classes) do
+    ordered[#ordered + 1] = { class = class, start = start }
+  end
+  table.sort(ordered, function(a, b) return a.start < b.start end)
+
+  local walked, truncated, truncated_why = 0, 0, {}
+  for index, entry in ipairs(ordered) do
+    -- The last class runs to the end of its bank, not the end of the ROM;
+    -- using the ROM would sweep in whatever follows and never look like the
+    -- padding it actually is.
+    local limit = ordered[index + 1] and ordered[index + 1].start
+      or (math.floor(entry.start / 0x4000) + 1) * 0x4000
+    local at = entry.start
+    while at < limit do
+      local record, consumed = trainers.decode(rom, at)
+      if not record then
+        -- Trailing zeros are the padding that ends a bank, not a defect.
+        local padding = true
+        for byte = at, limit - 1 do
+          if rom:u8(byte) ~= 0 then
+            padding = false
+            break
+          end
+        end
+        if not padding then
+          truncated = truncated + 1
+          if #truncated_why < 4 then
+            truncated_why[#truncated_why + 1] =
+              ("class %d at 0x%06X: %s"):format(entry.class, at,
+                tostring(consumed))
+          end
+        end
+        break
+      end
+      walked = walked + 1
+      at = at + consumed
+    end
+  end
+
+  log("        %d trainers walked across %d classes", walked, #ordered)
+  check("every class walks end to end without a rejection", truncated == 0,
+    ("%d classes truncated%s"):format(truncated,
+      #truncated_why > 0 and ("; " .. table.concat(truncated_why, ", ")) or ""))
+  check("the walk reaches as many trainers as the flat scan",
+    walked >= #all * 0.95, ("%d walked, %d scanned"):format(walked, #all))
+
   -- Every trainer object on a map must reach a real party, which ties the
   -- object type nibble, the trainer block and the class table together.
   local objects, trainer_objects, resolved = 0, 0, 0
@@ -1800,11 +1852,20 @@ local function test_trainer_objects(rom, map_result, species_names)
     objects, trainer_objects, resolved, out_of_range)
   check("Crystal has hundreds of trainer objects", trainer_objects >= 250,
     ("%d"):format(trainer_objects))
-  -- Not asserted at 100%, because it is not 100%. The party validator still
-  -- rejects a minority of entries, and a rejection part-way through a class
-  -- truncates every trainer after it in that class. Bounded here so the number
-  -- cannot quietly get worse while the shortfall stays visible.
-  check("most trainers reach a party", resolved >= trainer_objects * 0.8,
+  -- This number went down when it got honest, which is worth recording. It read
+  -- 279 while party_for was unbounded: an id past the end of its class walked
+  -- into the next class and returned a stranger's party, so an object asking
+  -- for class 25 id 10 came back with somebody else's trainer instead of
+  -- nothing. Bounding the walk cut it to the objects that genuinely agree with
+  -- the class table.
+  --
+  -- The shortfall is not the party validator — every class walks end to end,
+  -- checked above. It is the object type nibble: reading class and id from
+  -- byte 2 of the block resolves 156, against 47 for the next best offset and
+  -- zero for most, so the layout is right and the rest are not trainer blocks
+  -- at all. Asserted as a floor, since the way to move it is to classify those
+  -- objects properly rather than to loosen what counts as agreement.
+  check("trainer objects agree with the class table", resolved >= 150,
     ("%d of %d; e.g. %s"):format(resolved, trainer_objects,
       table.concat(unresolved_examples, ", ")))
 

@@ -34,7 +34,11 @@ charmap[0x9C] = ":"
 charmap[0x9D] = ";"
 charmap[0x9E] = "["
 charmap[0x9F] = "]"
-charmap[0xBA] = "é"
+-- $BA to $BF were mapped to the accent and the English contractions, copied
+-- from Gen 1. In Crystal those font tiles are blank, so whatever they are they
+-- are not glyphs that draw. Left mapped so text containing them still decodes
+-- rather than being rejected wholesale, but they are not to be trusted.
+charmap[0xBA] = "<BA>"
 charmap[0xBB] = "'d"
 charmap[0xBC] = "'l"
 charmap[0xBD] = "'s"
@@ -49,6 +53,13 @@ charmap[0xE5] = "'m"
 charmap[0xE6] = "?"
 charmap[0xE7] = "!"
 charmap[0xE8] = "."
+-- "&" continues the punctuation run after ? ! and the full stop, and its
+-- absence stopped a class walk dead: the twins are stored as "AMY & MAY", so
+-- one missing glyph truncated every trainer after them in that class.
+charmap[0xE9] = "&"
+-- The accent lives here, not at $BA. Both were candidates; the font settles it,
+-- since tile $EA - $40 carries ink and tile $BA - $40 is blank.
+charmap[0xEA] = "é"
 -- The gender symbols sit just below the digit block. Nidoran's two forms are
 -- distinguished only by these, so a charmap missing them fails on species 29.
 charmap[0xEF] = "♂"

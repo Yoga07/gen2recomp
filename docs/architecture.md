@@ -610,13 +610,44 @@ entry.** The class table stops resolving at class 51 and then resumes: classes
 first miss gave 50 classes; tolerating gaps and stopping after several
 consecutive misses gives 56.
 
+**One missing glyph costs a whole class.** The character map had no entry for
+`$E9`, and the twins are stored as "AMY & MAY", so the walk through their class
+stopped at the ampersand and every trainer after it became unreachable. Adding
+it took the table from 56 classes to 57 and the walk from 508 trainers to 518.
+The neighbouring `$EA` is the accented e; `$BA`, which had been carrying it,
+draws a blank tile, so the font settled which byte was which. `$BA` to `$BF`
+are still mapped, but as escapes rather than as glyphs to be trusted.
+
+Every class now walks from its first entry to the start of the next without a
+rejection, and the tests assert that at 100% rather than bounding it, because
+the failure mode is silent: a truncated class looks exactly like a short one.
+The only walk that stops early is the last, which runs into the zero padding at
+the end of its bank.
+
+### Where the table ends
+
+The table holds 57 classes and that is all of them, ending on EUSINE. Map
+objects name classes 58 to 62 and 66, and a contiguous block like that looks
+much more like a truncated table than like noise, so it was worth checking. The
+words at those positions read `$8085`, `$8A8B` and `$848D` — not near pointers
+at all, but the text of the first class's names. Parties continuing in a later
+bank were ruled out the same way.
+
 ### What is not reached
 
-274 of 332 trainer objects reach a party. 42 name a class outside the table and
-are probably not trainers at all — the block validator's class bound is only a
-range check. The rest fail because the party validator still rejects a minority
-of entries, and a rejection part-way through a class truncates every trainer
-after it in that class.
+156 of 332 objects carrying the trainer type nibble agree with the class table.
+That number used to read 274, and it fell because it stopped being wrong: the
+walk to the id-th trainer of a class was unbounded, so an object asking for
+class 25 id 10 — when class 25 is SABRINA and holds exactly one trainer — ran
+past the end and returned a stranger's party rather than nothing.
 
-The tests bound this rather than asserting it away, so the number can be
-improved but cannot quietly get worse.
+The shortfall is not the party validator. Reading class and id from byte 2 of
+the block resolves 156, against 47 for the next best offset and zero for most
+others, so the layout is right and the remainder are not trainer blocks. They
+are objects the type nibble puts in the trainer bucket whose script pointer
+leads somewhere else, and the way to move the number is to classify them
+properly, not to loosen what counts as agreement. The engine already treats a
+non-resolving object as not a trainer, so these start no battle.
+
+The tests assert this as a floor, so the number can be improved but cannot
+quietly get worse.

@@ -48,7 +48,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Audio | not started |
 | Reading real .sav files | not started |
 | **Engine:** map edge connections | working — 142 crossings |
-| **Engine:** trainer battles | working — 274 of 332 reach a party |
+| **Engine:** trainer battles | working — 518 trainers across 57 classes |
 
 Import a cartridge and press enter. Move with the arrow keys or WASD; doors
 warp between maps and routes run into each other at their edges, with the
