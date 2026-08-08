@@ -45,6 +45,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** status conditions and stat stages | working |
 | Items: names, prices, pockets, effects | working — 255 items |
 | **Engine:** the bag, and items in battle | working — 4 pockets |
+| Item balls on the ground | working — 178 pickups |
 | **Engine:** start menu, party list, summary | working |
 | Audio | not started |
 | Reading real .sav files | not started |
@@ -57,11 +58,13 @@ player and NPCs drawn from the cartridge's own
 sprites. Z or space reads a signpost or talks to someone. Walking in tall grass
 starts a battle, where Z confirms and the arrows pick FIGHT, BALL or RUN — a
 caught Pokemon joins your party. Balls come out of the bag and running out of
-them is a real outcome. X opens the menu — party list, summaries, and the bag,
-whose four pockets are filled from what the cartridge says each item is.
-F5 saves, and the bag is saved with it; a save is loaded automatically.
+them is a real outcome. Item balls lying on the ground are picked up by facing
+them and pressing Z, and stay picked up. X opens the menu — party list,
+summaries, and the bag, whose four pockets are filled from what the cartridge
+says each item is. F5 saves, and the bag goes with it; a save is loaded
+automatically.
 
-317 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+326 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

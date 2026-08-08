@@ -703,9 +703,38 @@ one place a name is read, and only to tell Master, Ultra and Great from the
 rest; the conditional balls fall through to the plain multiplier, which is what
 they are worth when their condition is not met.
 
+### Item balls, and how the type nibble was finally pinned down
+
+An object's type nibble was read as 0 script, 1 item ball, 2 trainer, but only
+the trainer value had ever been checked against anything, and the note claiming
+the other types never parse as trainer blocks was wrong — 188 of them do.
+
+The item ball settles it, because it can be shown rather than argued. Its
+script pointer leads to two bytes rather than to bytecode: an item and a
+quantity. Reading a byte pair as an item is weak on its own; 85% of the trainer
+objects pass that test too, since most byte pairs name some item. What is not
+weak is the spread. Reading the second byte with no filtering at all:
+
+| nibble | objects | distinct values in that byte |
+|---|---|---|
+| 0 (script) | 898 | 209 |
+| **1 (item ball)** | **178** | **1 — always `$01`** |
+| 2 (trainer) | 332 | 3 |
+
+Every item ball in the game holds exactly one thing. That uniformity is what
+identifies the type, not the plausibility of the item id. All 178 decode, and
+none of them names one of the unused TERU-SAMA slots.
+
+Picking one up is keyed by map and object index rather than by the object's
+event flag. The flag is what the cartridge uses, but position is unique by
+construction and does not rest on the flags being distinct, which has not been
+checked. A taken ball stops being drawn and stops being interactive, and the
+set of taken balls is saved with the game.
+
 ### What is not there yet
 
 The scripts that hand out items are not interpreted, so the starting bag is a
-stand-in written in the engine rather than something the cartridge granted. Item
-balls lying on the ground are objects the event decoder already sees but does
-not yet turn into pickups, and the mart inventories have not been located.
+stand-in written in the engine rather than something the cartridge granted. The
+mart inventories have not been located, and the hidden items — the ones found
+with the Itemfinder rather than seen on the ground — are a different structure
+that has not been looked at.

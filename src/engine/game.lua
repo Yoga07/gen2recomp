@@ -69,6 +69,8 @@ function game.new(game_id, start_index)
   instance.bag = bag.new(instance.item_records, instance.item_names)
   -- Trainers already beaten, keyed by their event flag. Saved with the game.
   instance.beaten = {}
+  -- Item balls already picked up, keyed by map and object index.
+  instance.taken = {}
 
   -- A stand-in for what the game's own scripts would hand out. Mum's potion,
   -- the balls from the mart and a key item are enough to exercise every pocket;
@@ -100,6 +102,7 @@ function game:save()
     facing = self.player.facing,
     party = self.party,
     beaten = self.beaten,
+    taken = self.taken,
     bag = self.bag:to_list(),
   })
 
@@ -132,6 +135,7 @@ function game:restore()
 
   self.party = state.party
   self.beaten = state.beaten or {}
+  self.taken = state.taken or {}
   -- A save written before the bag existed has no list, and the starting items
   -- set up in game.new stand rather than the bag coming back empty.
   if state.bag then
@@ -243,6 +247,31 @@ function game:show_trainer_demo()
           if self:start_trainer_battle(object.trainer) then
             return true
           end
+        end
+      end
+    end
+  end
+  return false
+end
+
+--- Stand in front of the first item ball on any map and pick it up.
+-- @param again when true, take it, then try to take it a second time and show
+--        the ball pocket. Taking twice would show a count of two.
+function game:show_item_demo(again)
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, object in ipairs(map.objects or {}) do
+        if object.item then
+          self:enter(index, object.x, object.y + 1, "up")
+          self:interact()
+          if again then
+            self.dialogue = nil
+            self:interact()
+            self.dialogue = nil
+            self:open_pocket("balls")
+          end
+          return true
         end
       end
     end
@@ -700,6 +729,58 @@ function game:facing_trainer()
   return nil
 end
 
+--- The item ball the player is facing, if it is still there.
+-- @return the item block, and the key that says this one has been taken
+function game:facing_item()
+  local delta = FACING_DELTA[self.player.facing]
+  local x = self.player.cell_x + delta[1]
+  local y = self.player.cell_y + delta[2]
+
+  for index, object in ipairs(self.map.objects or {}) do
+    if object.x == x and object.y == y and object.item then
+      -- Keyed by where it lies rather than by its event flag. The flag is what
+      -- the cartridge uses, but map and position are unique by construction and
+      -- do not depend on the flags being distinct, which has not been checked.
+      local key = ("%d:%d"):format(self.map_index, index)
+      if not self.taken[key] then
+        return object.item, key
+      end
+    end
+  end
+  return nil
+end
+
+--- Pick up an item ball.
+function game:take_item(block, key)
+  local name = self.item_names and self.item_names[block.item]
+    or ("item %d"):format(block.item)
+
+  local taken = self.bag:add(block.item, block.quantity)
+  if taken < block.quantity then
+    -- The ball stays on the ground, the way it does when the bag is full.
+    self:say({ "You have no room for", ("the %s!"):format(name) })
+    return false
+  end
+
+  self.taken[key] = true
+  self:say({ ("Found %s!"):format(name) })
+  return true
+end
+
+--- Put some lines of our own into the text box.
+--
+-- Dialogue read from the cartridge carries both the rendered string and the
+-- character codes behind it, because the bitmap font draws codes rather than
+-- text. Lines written here have to be encoded the same way or the font is
+-- handed a nil.
+function game:say(lines)
+  local page = {}
+  for index, line in ipairs(lines) do
+    page[index] = { text = line, codes = self:encode(line) }
+  end
+  self.dialogue = { pages = { page }, page = 1 }
+end
+
 --- Build a trainer's party from the cached class tables.
 -- @return party, trainer name
 function game:trainer_party(class, id)
@@ -793,6 +874,13 @@ function game:interact()
   -- A trainer takes precedence: facing one starts a fight rather than a chat.
   local trainer = self:facing_trainer()
   if trainer and self:start_trainer_battle(trainer) then
+    return
+  end
+
+  -- An item ball has no dialogue of its own; picking it up is the interaction.
+  local block, key = self:facing_item()
+  if block then
+    self:take_item(block, key)
     return
   end
 
@@ -1315,15 +1403,21 @@ function game:draw(scale)
   -- NPCs. Sprites stand a little taller than their cell, so they are drawn
   -- shifted up by half a tile the way the original did.
   love.graphics.setColor(1, 1, 1)
-  for _, object in ipairs(map.objects or {}) do
+  for index, object in ipairs(map.objects or {}) do
     local ox = object.x * world.CELL_PIXELS - camera_x
     local oy = object.y * world.CELL_PIXELS - camera_y - 4
+    -- An item ball that has been picked up is gone from the map, not still
+    -- lying there to be walked into.
+    if object.item and self.taken[("%d:%d"):format(self.map_index, index)] then
+      goto continue
+    end
     if not self.world:draw_ow_sprite(object.sprite, ox, oy, "down") then
       love.graphics.setColor(0.4, 0.6, 1, 0.75)
       love.graphics.rectangle("fill", ox + 3, oy + 7,
         world.CELL_PIXELS - 6, world.CELL_PIXELS - 6)
       love.graphics.setColor(1, 1, 1)
     end
+    ::continue::
   end
 
   -- The player. Sprite 1 is the player character.

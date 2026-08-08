@@ -339,7 +339,7 @@ function importer.run(path, progress)
   -- to look.
   local map_summary = { count = 0, blocks = 0, warps = 0, objects = 0,
                         event_failures = 0, scripts = 0, scripts_read = 0,
-                        with_encounters = 0, trainers = 0 }
+                        with_encounters = 0, trainers = 0, items = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -421,6 +421,13 @@ function importer.run(path, progress)
               if trainer then
                 record.objects[index].trainer = trainer
                 map_summary.trainers = map_summary.trainers + 1
+              end
+            elseif object.kind == events.OBJECT_ITEM and object.script then
+              -- An item ball points at two bytes, not at bytecode.
+              local item = events.decode_item(rom, script_bank, object.script)
+              if item then
+                record.objects[index].item = item
+                map_summary.items = map_summary.items + 1
               end
             end
           end
@@ -597,6 +604,8 @@ function importer.format_report(report)
       :format("encounters", report.maps.with_encounters)
     lines[#lines + 1] = ("  %-16s %4d trainer objects on maps")
       :format("trainers", report.maps.trainers)
+    lines[#lines + 1] = ("  %-16s %4d item balls on the ground")
+      :format("items", report.maps.items)
   end
 
   if next(report.failed) then

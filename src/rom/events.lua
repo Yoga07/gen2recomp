@@ -100,6 +100,36 @@ function events.decode_trainer(rom, bank, addr)
   }
 end
 
+-- An item ball's script points at two bytes rather than at bytecode: which
+-- item, and how many. Every item ball in Crystal holds exactly one.
+events.ITEM_BLOCK = 2
+
+--- Read the item block an item-ball object points at.
+-- @param bank the bank the object's script pointer is relative to
+-- @return { item, quantity } or nil plus a reason
+function events.decode_item(rom, bank, addr)
+  if not addr or addr < 0x4000 or addr > 0x7FFF then
+    return nil, "script pointer out of range"
+  end
+  local at = bank * 0x4000 + (addr - 0x4000)
+  if at + events.ITEM_BLOCK > rom.size then
+    return nil, "item block runs past the ROM"
+  end
+
+  local item = rom:u8(at)
+  local quantity = rom:u8(at + 1)
+  if item < 1 then
+    return nil, "item 0 does not exist"
+  end
+  -- The quantity is bounded by what the bag can hold in one stack. Nothing in
+  -- Crystal exceeds one, but the field is a byte and a wider game might.
+  if quantity < 1 or quantity > 99 then
+    return nil, ("quantity %d is out of range"):format(quantity)
+  end
+
+  return { offset = at, item = item, quantity = quantity }
+end
+
 events.bg_types = {
   [0] = "read", "up", "down", "right", "left", "if_set", "if_not_set",
   "item", "copy",
@@ -238,10 +268,15 @@ function events.decode(rom, header)
       radius_x = math.floor(radius / 16),
       hour = rom:u8(at + 5),
       time_of_day = rom:u8(at + 6),
-      -- One byte holding two nibbles: palette above, object type below. Type
-      -- 2 is a trainer, established by checking which value's objects have a
-      -- script that parses as a trainer block — 332 of 333 do, against none
-      -- for the other types.
+      -- One byte holding two nibbles: palette above, object type below.
+      --
+      -- Type 1 is an item ball and type 2 a trainer. The item ball is the one
+      -- that can be shown rather than argued: its script pointer leads to two
+      -- bytes, an item and a quantity, and across all 178 of them the quantity
+      -- byte takes exactly one value, $01. The 898 type-0 objects take 209
+      -- different values in that position. Reading a byte pair as an item is
+      -- weak on its own — 85% of the trainers pass it too — so it is that
+      -- uniformity, not the plausibility, that identifies the type.
       colour_function = rom:u8(at + 7),
       palette = math.floor(rom:u8(at + 7) / 16),
       kind = rom:u8(at + 7) % 16,

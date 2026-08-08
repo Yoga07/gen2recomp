@@ -106,6 +106,16 @@ function save.write(game, state)
     -- The bag, as { item, count } pairs. Only what is held is written, so an
     -- empty bag costs nothing and a save from before items existed still reads.
     bag = state.bag or {},
+    -- Item balls already picked up. Keys are strings, so unlike the beaten
+    -- flags they are written as a list of those keys rather than of numbers.
+    taken = (function()
+      local keys = {}
+      for key in pairs(state.taken or {}) do
+        keys[#keys + 1] = key
+      end
+      table.sort(keys)
+      return keys
+    end)(),
     saved_at = os.time(),
   }
 
@@ -162,6 +172,13 @@ function save.read(game, base_stats)
     facing = record.facing,
     party = party,
     beaten = beaten,
+    taken = (function()
+      local keys = {}
+      for _, key in ipairs(record.taken or {}) do
+        keys[key] = true
+      end
+      return keys
+    end)(),
     bag = record.bag,
     saved_at = record.saved_at,
   }

@@ -1809,7 +1809,73 @@ local function test_menu()
   check_equal("exactly one row is selected", marked, 1)
 end
 
---- Trainers on maps, and the class table that reaches their parties.
+--- Item balls lying on the ground.
+local function test_item_balls(rom, map_result, item_names)
+  log("\n== item balls ==")
+  if not map_result or not item_names then
+    log("  SKIP  maps or item names were not located")
+    return
+  end
+
+  local by_kind = {}
+  local balls, quantities, placeholder = {}, {}, 0
+
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local bank = math.floor(header.attributes.scripts / 0x4000)
+      for _, object in ipairs(decoded.objects) do
+        by_kind[object.kind] = (by_kind[object.kind] or 0) + 1
+        if object.kind == events.OBJECT_ITEM and object.script then
+          local block = events.decode_item(rom, bank, object.script)
+          if block then
+            balls[#balls + 1] = block
+            quantities[block.quantity] = (quantities[block.quantity] or 0) + 1
+            -- TERU-SAMA is the placeholder name on the unused item slots. A
+            -- real pickup never names one.
+            if item_names[block.item] == "TERU-SAMA" then
+              placeholder = placeholder + 1
+            end
+          end
+        end
+      end
+    end
+  end
+
+  log("        %d item balls over %d objects of that type", #balls,
+    by_kind[events.OBJECT_ITEM] or 0)
+  check("Crystal has well over a hundred item balls", #balls >= 150,
+    ("%d"):format(#balls))
+  check_equal("every object of that type decodes as an item", #balls,
+    by_kind[events.OBJECT_ITEM] or 0)
+
+  -- This is the evidence that the nibble means what we think. The quantity
+  -- byte is read with no filtering at all in the probe and takes exactly one
+  -- value across every item ball; here the decoded quantity says the same.
+  local distinct = 0
+  for _ in pairs(quantities) do distinct = distinct + 1 end
+  check_equal("every item ball holds exactly one thing", distinct, 1)
+  check("and that one thing is a single item", quantities[1] == #balls)
+
+  check_equal("no item ball names an unused slot", placeholder, 0)
+
+  -- Spot check that the pickups are the sort of thing found on the ground.
+  local found = {}
+  for _, block in ipairs(balls) do
+    found[item_names[block.item] or "?"] = true
+  end
+  check("the ground holds ULTRA BALLs", found["ULTRA BALL"] == true)
+  check("and NUGGETs", found["NUGGET"] == true)
+  check("and RARE CANDY", found["RARE CANDY"] == true)
+
+  -- Item balls and trainers must not be the same objects.
+  check("item balls are a different type from trainers",
+    events.OBJECT_ITEM ~= events.OBJECT_TRAINER)
+  log("        objects by type nibble: 0 -> %d, 1 -> %d, 2 -> %d",
+    by_kind[0] or 0, by_kind[1] or 0, by_kind[2] or 0)
+end
+
+-- Trainers on maps, and the class table that reaches their parties.
 local function test_trainer_objects(rom, map_result, species_names)
   log("\n== trainers on maps ==")
   if not map_result then
@@ -2343,6 +2409,8 @@ function harness.run(rom_path, report_path)
     test_status(found and found.base_stats, found and found.moves)
     test_menu()
     test_items(found and found.item_attributes and found.item_attributes.records,
+      found and found.item_names and found.item_names.records)
+    test_item_balls(rom, map_result,
       found and found.item_names and found.item_names.records)
     test_trainer_objects(rom, map_result,
       found and found.species_names and found.species_names.records)
