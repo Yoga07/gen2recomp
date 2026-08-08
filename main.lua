@@ -131,8 +131,8 @@ function love.load(args)
         path = args[i + 1],
         map_index = tonumber(args[i + 2]),
         sign = (args[i + 2] == "sign" or args[i + 2] == "npc"
-          or args[i + 2] == "grass" or args[i + 2] == "catch")
-          and args[i + 2] or nil,
+          or args[i + 2] == "grass" or args[i + 2] == "catch"
+          or args[i + 2] == "catchsave") and args[i + 2] or nil,
         frames = 2,
       }
     end
@@ -149,7 +149,8 @@ function love.load(args)
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
     end
-    if state.shot and (state.shot.sign == "grass" or state.shot.sign == "catch") then
+    if state.shot and (state.shot.sign == "grass" or state.shot.sign == "catch"
+      or state.shot.sign == "catchsave") then
       state.game:show_first_encounter(state.shot.sign)
     elseif state.shot and state.shot.sign then
       state.game:show_first_sign(state.shot.sign)
@@ -212,6 +213,8 @@ function love.keypressed(key)
       state.game:battle_menu_move(1)
     elseif key == "escape" then
       show_idle()
+    elseif key == "f5" then
+      state.game:save()
     elseif key == "f11" then
       love.window.setFullscreen(not love.window.getFullscreen())
     elseif key == "=" or key == "+" then

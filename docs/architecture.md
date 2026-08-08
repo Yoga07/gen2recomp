@@ -501,3 +501,27 @@ switching. The battle loop is the skeleton those hang from.
 - **Audio.** The Gen 2 sound engine is a bytecode sequencer driving four
   channels. Synthesising it at runtime from the extracted channel programs is
   the approach gen1recomp took and is almost certainly right here too.
+
+## Saves are the engine's state, not the cartridge's
+
+A save here is the engine's own state serialised as Lua, not Gen 2's SRAM
+layout. Emulating SRAM would mean designing for data the engine does not have —
+boxes, badges, money, the Pokédex — and binding the save to Crystal's structure
+before there is anything to put in it. Reading a real `.sav` so a player can
+import their own progress is a separate feature, and a worthwhile one.
+
+Saves sit beside the cache but are not part of it, and the distinction matters:
+the cache is derived from a cartridge and can be rebuilt by re-importing, while
+a save is the only copy of what the player did. Clearing one must never clear
+the other.
+
+**Stats are deliberately not stored.** A Pokémon is its species, level and DVs,
+and everything else follows, so the save keeps only those plus current HP and
+recomputes the rest on load. That keeps saves small, and it means a correction
+to the stat formula reaches saves already written instead of baking the old
+numbers in permanently. Current HP is genuine state rather than derivation, so
+it is stored — and clamped on load, in case a formula fix lowered the maximum
+since.
+
+A save whose `format_version` does not match is refused rather than
+half-interpreted, the same rule the cache uses.

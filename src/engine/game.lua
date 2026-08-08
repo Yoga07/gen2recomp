@@ -11,6 +11,7 @@ local wild = require("src.engine.wild")
 local pokemon = require("src.engine.pokemon")
 local battle = require("src.engine.battle")
 local catching = require("src.engine.catching")
+local save = require("src.engine.save")
 
 local game = {}
 game.__index = game
@@ -40,6 +41,7 @@ function game.new(game_id, start_index)
   end
 
   local instance = setmetatable({
+    game_id = game_id,
     world = loaded,
     groups = cache.read(game_id, "map_groups") or {},
     canvas = love.graphics.newCanvas(game.SCREEN_WIDTH, game.SCREEN_HEIGHT),
@@ -59,8 +61,60 @@ function game.new(game_id, start_index)
   instance.move_name_records = cache.read(game_id, "move_names")
   instance.learnset_records = cache.read(game_id, "learnsets")
 
-  instance:enter(start_index or instance:default_map())
+  -- A save takes precedence over the default starting map.
+  local restored = instance:restore()
+  if not restored then
+    instance:enter(start_index or instance:default_map())
+  elseif start_index then
+    -- An explicit map wins over the save, so the screenshot modes still work.
+    instance:enter(start_index)
+  end
+
   return instance
+end
+
+--- Write the current state to disk.
+-- @return true, or false plus a reason
+function game:save()
+  local ok, why = save.write(self.game_id, {
+    map_index = self.map_index,
+    cell_x = self.player.cell_x,
+    cell_y = self.player.cell_y,
+    facing = self.player.facing,
+    party = self.party,
+  })
+
+  if ok then
+    self:notify(("Saved. Party: %d"):format(#(self.party or {})))
+    return true
+  end
+
+  self:notify(tostring(why))
+  return false
+end
+
+--- Load a save, if there is one for this game.
+-- @return true when state was restored
+function game:restore()
+  local state, why = save.read(self.game_id, self.base_stats)
+  if not state then
+    -- "no save" is the ordinary case and not worth reporting.
+    if why ~= "no save" then
+      self:notify(why)
+    end
+    return false
+  end
+
+  local map = state.map_index and self.world:map(state.map_index)
+  if not map or map.unparsed then
+    self:notify("the save points at a map this cache does not have")
+    return false
+  end
+
+  self.party = state.party
+  self:enter(state.map_index, state.cell_x, state.cell_y, state.facing)
+  self:notify(("Loaded. Party: %d"):format(#state.party))
+  return true
 end
 
 --- Somewhere interesting to start: the biggest town, falling back to the
@@ -166,11 +220,17 @@ function game:show_first_encounter(demo)
             end)
             if met then
               self:wild_encounter(met)
-              if demo == "catch" and self.battle then
+              if (demo == "catch" or demo == "catchsave") and self.battle then
                 -- Weaken it and throw, so the screenshot shows a catch
                 -- resolving through the party rather than a menu.
                 self.battle.opponent.hp = 1
                 self:throw_ball()
+                if demo == "catchsave" then
+                  -- Dismiss the battle so the save records the overworld
+                  -- position rather than a state mid-encounter.
+                  self.battle = nil
+                  self:save()
+                end
                 return true
               end
               -- Run one turn so the screenshot shows a battle in progress

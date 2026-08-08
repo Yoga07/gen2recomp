@@ -38,20 +38,22 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** Pokémon stats and party | working |
 | **Engine:** battles — types, damage, turn order | working |
 | **Engine:** catching and party | working |
+| **Engine:** save and load | working |
 | Map scripts | walked for text: 480 of 2200 |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | Script bytecode beyond text | not started |
 | Status conditions, stat stages, items | not started |
-| Menus, save, audio | not started |
+| Menus, audio | not started |
+| Reading real .sav files | not started |
 | Map edge connections | extracted, not implemented |
 
 Import a cartridge and press enter. Move with the arrow keys or WASD; doors
 warp between maps, and the player and NPCs are drawn with the cartridge's own
 sprites. Z or space reads a signpost or talks to someone. Walking in tall grass
 starts a battle, where Z confirms and the arrows pick FIGHT, BALL or RUN — a
-caught Pokemon joins your party.
+caught Pokemon joins your party. F5 saves; a save is loaded automatically.
 
-208 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+224 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

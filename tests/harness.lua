@@ -1414,6 +1414,85 @@ local function test_catching(base_stats)
   log("        Rattata L10 half HP: value %d of 255", value)
 end
 
+--- Saving and loading.
+--
+-- Runs against the real cache, writes a save, reads it back, and then removes
+-- it so the test leaves nothing behind.
+local function test_save(base_stats)
+  log("\n== saving ==")
+  if not base_stats then
+    log("  SKIP  base stats were not located")
+    return
+  end
+
+  local save = require("src.engine.save")
+  local pokemon = require("src.engine.pokemon")
+  local stats = base_stats.records
+  local game_id = "harness_test"
+
+  -- A party worth round-tripping: two members, one hurt, distinct DVs.
+  local first = pokemon.new(155, stats[155], {
+    level = 12,
+    dvs = { attack = 9, defense = 4, speed = 15, special = 2 },
+    moves = { 33, 52 },
+  })
+  first.hp = 7
+
+  local second = pokemon.new(19, stats[19], {
+    level = 3,
+    dvs = { attack = 1, defense = 1, speed = 1, special = 1 },
+    moves = { 33 },
+  })
+
+  local ok, why = save.write(game_id, {
+    map_index = 42, cell_x = 11, cell_y = 13, facing = "left",
+    party = { first, second },
+  })
+  if not check("a save is written", ok, why) then
+    return
+  end
+
+  local state, read_err = save.read(game_id, stats)
+  if not check("a save is read back", state ~= nil, read_err) then
+    save.remove(game_id)
+    return
+  end
+
+  check_equal("the map survives", state.map_index, 42)
+  check_equal("the position survives", state.cell_x, 11)
+  check_equal("the facing survives", state.facing, "left")
+  check_equal("the party size survives", #state.party, 2)
+
+  local restored = state.party[1]
+  check_equal("species survives", restored.species, 155)
+  check_equal("level survives", restored.level, 12)
+  check_equal("DVs survive", restored.dvs.speed, 15)
+  check_equal("current HP survives", restored.hp, 7)
+  check_equal("moves survive", restored.moves[2], 52)
+
+  -- Stats are not stored; they are recomputed, so they must match exactly what
+  -- the same species, level and DVs produce fresh.
+  local fresh = pokemon.new(155, stats[155], {
+    level = 12,
+    dvs = { attack = 9, defense = 4, speed = 15, special = 2 },
+  })
+  check_equal("stats are recomputed, not stored",
+    restored.stats.attack, fresh.stats.attack)
+  check_equal("recomputed HP matches too", restored.stats.hp, fresh.stats.hp)
+  check("current HP is below maximum after loading a hurt Pokémon",
+    restored.hp < restored.stats.hp)
+
+  -- A save from a future format must be refused rather than half-read.
+  local raw = ("return { format_version = %d, game = %q, party = {} }")
+    :format(save.FORMAT_VERSION + 1, game_id)
+  love.filesystem.write(save.path(game_id), raw)
+  local refused, version_err = save.read(game_id, stats)
+  check("a save from a newer format is refused", refused == nil, version_err)
+
+  save.remove(game_id)
+  check("the save can be removed", not save.exists(game_id))
+end
+
 --- The engine reads only the cache, never a cartridge, so these tests check the
 -- cached data is shaped the way a game needs rather than the way a viewer does.
 -- Skipped when nothing has been imported yet.
@@ -1669,6 +1748,7 @@ function harness.run(rom_path, report_path)
       found and found.species_names and found.species_names.records,
       found and found.move_names and found.move_names.records)
     test_catching(found and found.base_stats)
+    test_save(found and found.base_stats)
     test_battle(found and found.base_stats, found and found.moves,
       found and found.species_names and found.species_names.records,
       found and found.move_names and found.move_names.records)
