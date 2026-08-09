@@ -37,6 +37,7 @@ local HEADLESS = {
   ["--probe-stdscripts"] = "tests.probe_stdscripts",
   ["--probe-specials"] = "tests.probe_specials",
   ["--probe-movement"] = "tests.probe_movement",
+  ["--probe-audio"] = "tests.probe_audio",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }

@@ -22,6 +22,7 @@ local trainers = require("src.rom.trainers")
 local marts = require("src.rom.marts")
 local script_decode = require("src.rom.script_decode")
 local std_scripts = require("src.rom.std_scripts")
+local music = require("src.rom.music")
 local learnsets = require("src.rom.learnsets")
 local cache = require("src.import.cache")
 
@@ -303,6 +304,20 @@ function importer.run(path, progress)
       mart_summary.count = mart_result.count
       cache.write(descriptor.game, "marts", mart_result.lists)
     end
+  end
+
+  -- The music table. Read, not played: sound would need the channel command
+  -- language and a Game Boy sound chip to feed it to.
+  local music_summary = { count = 0, exact = 0 }
+  step("locating music")
+  local music_result, music_err = music.locate(rom)
+  if not music_result then
+    failed.music = music_err
+  else
+    offsets.music = music_result.offset
+    music_summary.count = music_result.count
+    music_summary.exact = music_result.exact
+    cache.write(descriptor.game, "music", music_result.songs)
   end
 
   -- The font, so the engine can draw text in the cartridge's own letters.
@@ -643,6 +658,7 @@ function importer.run(path, progress)
     ow_sprites = ow_summary,
     battle_data = battle_summary,
     marts = mart_summary,
+    music = music_summary,
     script_code = script_summary,
     sha1 = sha1,
   }
@@ -715,6 +731,11 @@ function importer.format_report(report)
       report.script_code.failed)
     lines[#lines + 1] = ("  %-16s %4d standard scripts")
       :format("std scripts", report.script_code.std)
+  end
+
+  if report.music and report.music.count > 0 then
+    lines[#lines + 1] = ("  %-16s %4d songs, %d headers closing exactly")
+      :format("music", report.music.count, report.music.exact)
   end
 
   if report.marts and report.marts.count > 0 then

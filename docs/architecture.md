@@ -891,6 +891,50 @@ Wiring them in took the interpreter from 1396 text boxes across a full run to
 **2833**, and `jumpstd` no longer appears among the reasons scripts stop — the
 only two left are the misparsed operands, 3084 and 3853.
 
+## The music table, and what is not there
+
+A song is a header followed by one command stream per channel. The header is a
+run of three-byte entries — a channel index, then a near pointer — and the first
+byte also carries how many channels there are in its top two bits. `$C0` means
+"four channels, this is channel 0", and the entries after it must then read 1, 2
+and 3.
+
+That packing is specific, but on its own it only *allows* a header. What
+confirms one is that **the header ends exactly where its first channel begins**:
+the entries are contiguous with the data they point at, so the arithmetic has to
+close.
+
+The table holds **59 songs**, spread across banks `$3A`, `$3B` and `$3D` — which
+is why the first search found only 10. It required every entry to name the same
+bank, the sharpening that had worked for the standard scripts, and music does
+not fit in one bank. Reading the bank per entry and then walking backwards from
+the run, the way the standard-script table needed, gives the whole thing.
+
+Of the 59, **52 close exactly**. The other seven are short by one byte — and by
+*exactly* one byte, every time, with no other value appearing. That uniformity is
+the useful part: a scattered mismatch would mean the shape was wrong, while a
+single repeated offset means the shape is right and there is one padding
+convention here that has not been identified. It is flagged rather than rounded
+off, and there is a test that the mismatches stay uniform.
+
+Channel counts come out at one song with two channels, 24 with three and 34 with
+four, and every song's channel pointers climb in order.
+
+### Nothing plays
+
+This is the table, read and cached. It is not sound.
+
+Playing it needs two things that do not exist here. The channel streams are a
+bytecode of their own — notes, octaves, tempo, envelopes, loops, calls — which
+would have to be worked out the way the movement language was, and that one had
+five commands against this one's several dozen. And the output of that bytecode
+is register writes to a Game Boy sound chip: four channels of square, wave and
+noise generation that would have to be synthesised sample by sample.
+
+Extracting the table without claiming to play it is the honest half. `playsound`,
+`cry` and `playmusic` remain among the commands the interpreter steps over, and
+the test output still names them.
+
 ### Movement
 
 `applymovement` names an object and points at a little language of its own: one

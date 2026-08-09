@@ -2165,6 +2165,78 @@ local function test_text_codes()
   end)())
 end
 
+-- The music table. Located and read; not played.
+local function test_music(rom)
+  log("\n== music ==")
+
+  local music = require("src.rom.music")
+
+  local result, why = music.locate(rom)
+  if not check("the music table was located", result ~= nil, why) then
+    return
+  end
+
+  log("        %d songs at 0x%06X, %d headers end exactly where their first " ..
+    "channel begins", result.count, result.offset, result.exact)
+
+  check("Crystal has dozens of songs", result.count >= 40
+    and result.count <= 200, ("%d"):format(result.count))
+
+  -- The structural agreement the locator rests on, asserted rather than
+  -- assumed: a header's entries are contiguous with the data they point at, so
+  -- the arithmetic has to close. It closes for most of them.
+  check("most headers run straight into their own channel data",
+    result.exact >= result.count * 0.75,
+    ("%d of %d"):format(result.exact, result.count))
+
+  -- Songs use two, three or four channels, and the Game Boy has four.
+  local by_count, slack = {}, {}
+  for _, song in ipairs(result.songs) do
+    by_count[song.count] = (by_count[song.count] or 0) + 1
+    if not song.exact then
+      slack[song.slack] = (slack[song.slack] or 0) + 1
+    end
+  end
+  local shape = {}
+  for count, times in pairs(by_count) do
+    shape[#shape + 1] = ("%d channels x%d"):format(count, times)
+  end
+  table.sort(shape)
+  log("        %s", table.concat(shape, ", "))
+
+  check("no song asks for more channels than the hardware has",
+    by_count[5] == nil and by_count[0] == nil)
+  check("most songs use three or four channels",
+    (by_count[3] or 0) + (by_count[4] or 0) >= result.count * 0.8)
+
+  -- Where a header does not close exactly, by how much. A scatter would mean
+  -- the shape is wrong; one consistent value means one unexplained byte.
+  local gaps = {}
+  for value, times in pairs(slack) do
+    gaps[#gaps + 1] = ("%d byte x%d"):format(value, times)
+  end
+  table.sort(gaps)
+  if #gaps > 0 then
+    log("        the rest are short by: %s", table.concat(gaps, ", "))
+  end
+  check("the ones that do not close are all off by the same amount",
+    #gaps <= 1, table.concat(gaps, ", "))
+
+  -- Channels are stored in order within a song.
+  local ordered = 0
+  for _, song in ipairs(result.songs) do
+    local rising = true
+    for index = 2, song.count do
+      if song.channels[index] < song.channels[index - 1] then
+        rising = false
+      end
+    end
+    if rising then ordered = ordered + 1 end
+  end
+  check_equal("every song's channels are stored in order", ordered,
+    result.count)
+end
+
 -- Movement blocks: the little language applymovement points at.
 local function test_movement(rom, map_result)
   log("\n== movement ==")
@@ -3256,6 +3328,7 @@ function harness.run(rom_path, report_path)
     test_item_balls(rom, map_result,
       found and found.item_names and found.item_names.records)
     test_text_codes()
+    test_music(rom)
     test_movement(rom, map_result)
     test_script_vm(rom, map_result)
     test_hidden_items(rom, map_result,

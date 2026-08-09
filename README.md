@@ -54,7 +54,8 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Mart inventories | working — 34 shops, 27 shopkeepers |
 | **Engine:** shop counters, buying and selling | working — by quantity |
 | **Engine:** start menu, party list, summary | working |
-| Audio | not started |
+| Music table | located — 59 songs; nothing plays yet |
+| Audio playback | not started — needs a Game Boy sound chip |
 | Reading real .sav files | not started |
 | **Engine:** map edge connections | working — 142 crossings |
 | **Engine:** trainer battles | working — 518 trainers across 57 classes |
@@ -76,7 +77,7 @@ and the bag, whose four pockets are filled from what the cartridge says each
 item is. F5 saves, and the bag and your money go with it; a save is loaded
 automatically.
 
-418 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+425 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
