@@ -2230,11 +2230,11 @@ local function test_sav(base_stats)
     { 251, 70 },  -- CELEBI
   }
 
-  local function build_party(damage)
+  local function build_party(damage, level_shift)
     local list, members = {}, {}
     for index, entry in ipairs(party) do
       list[index] = byte(entry[1])
-      members[index] = member(entry[1], entry[2], dvs,
+      members[index] = member(entry[1], entry[2] + (level_shift or 0), dvs,
         index == 2 and { hp = 5000, attack = 12000 } or nil)
     end
     -- Count, six species slots however many are filled, then the terminator.
@@ -2284,6 +2284,39 @@ local function test_sav(base_stats)
       members[2].stats.hp > pokemon.stat(base_stats[25].hp,
         pokemon.dv_for(dvs, "hp"), 31, "hp", 0))
   end
+
+  -- A real Crystal save holds the party twice: the cartridge keeps a backup of
+  -- everything it writes. Two copies saying the same thing is one party, not an
+  -- ambiguity, and the reader has to see it that way or it refuses every real
+  -- save there is.
+  local twice = save_with(block, hidden_at)
+  local backup_at = hidden_at + 0xE00
+  twice = twice:sub(1, backup_at) .. block
+    .. twice:sub(backup_at + #block + 1)
+  local both, from, copies = sav.find_party(twice, base_stats)
+  check("a party stored twice is still one party", both ~= nil, tostring(from))
+  check_equal("and both copies are counted", copies, 2)
+  check_equal("reading from the first", from, hidden_at)
+
+  -- Copies that disagree are a save caught mid-write, and choosing between
+  -- them is not this code's decision. Both have to be valid parties for this
+  -- to test anything: a corrupt backup fails the stat check outright and is
+  -- not a competing answer at all, which is why the first attempt at this test
+  -- passed for the wrong reason.
+  local other = build_party(false, 1)
+  local disagreeing = twice:sub(1, backup_at) .. other
+    .. twice:sub(backup_at + #other + 1)
+  check_equal("both copies are valid parties",
+    #sav.find_parties(disagreeing, base_stats), 2)
+  check("but disagreeing copies are refused",
+    sav.find_party(disagreeing, base_stats) == nil)
+
+  -- And a backup that is merely corrupt does not stop the good copy being
+  -- read, since it is not a party at all.
+  local corrupt = twice:sub(1, backup_at) .. build_party(true)
+    .. twice:sub(backup_at + #block + 1)
+  check("a corrupt backup does not block the good copy",
+    sav.find_party(corrupt, base_stats) ~= nil)
 
   -- The check that matters. One stat byte off by one, everything else perfect.
   local damaged = save_with(build_party(true), hidden_at)

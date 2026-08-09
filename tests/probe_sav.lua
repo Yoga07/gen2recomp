@@ -57,13 +57,22 @@ function probe.run(rom_path, report_path, save_path)
   log("%s", save_path)
   log("  %d bytes", #data)
 
-  local members, where = sav.find_party(data, stats.records)
+  -- Show every candidate, so a disagreement between the save and its backup is
+  -- visible rather than just fatal.
+  local candidates = sav.find_parties(data, stats.records)
+  log("  %d offsets hold a party:", #candidates)
+  for _, entry in ipairs(candidates) do
+    log("    0x%04X  %s", entry.at, sav.fingerprint(entry.members))
+  end
+
+  local members, where, copies = sav.find_party(data, stats.records)
   if not members then
     log("  no party: %s", tostring(where))
     return finish()
   end
 
-  log("  party found at 0x%04X, %d members", where, #members)
+  log("  party read from 0x%04X, %d members, %d identical copies", where,
+    #members, copies)
   for index, member in ipairs(members) do
     local name = names and names.records[member.species] or "?"
     log("    %d  %-11s L%-3d %d/%d HP  atk %d def %d spd %d spa %d spd %d%s",

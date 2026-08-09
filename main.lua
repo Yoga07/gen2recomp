@@ -229,7 +229,9 @@ function love.filedropped(file)
   -- importer: it carries a party, not a game.
   if path:lower():match("%.sav$") or path:lower():match("%.srm$") then
     if state.screen == "playing" and state.game then
-      local count, why = state.game:import_sav(path)
+      -- The File object rather than the path: these files usually live
+      -- somewhere with an accent in the name, which io.open cannot open.
+      local count, why = state.game:import_sav(file)
       if not count then
         state.screen = "error"
         set_lines(("could not read that save\n\n%s\n\npress escape to go back")

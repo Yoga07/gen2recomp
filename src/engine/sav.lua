@@ -204,12 +204,40 @@ function sav.party_at(data, at, base_stats)
   return members
 end
 
+--- Every offset in a save that holds a party.
+-- @return list of { at, members }
+function sav.find_parties(data, base_stats)
+  local found = {}
+  for at = 0, #data - (2 + sav.PARTY_LIMIT + sav.MEMBER_SIZE) do
+    local members = sav.party_at(data, at, base_stats)
+    if members then
+      found[#found + 1] = { at = at, members = members }
+    end
+  end
+  return found
+end
+
+--- A short string standing for a party, for comparing two of them.
+function sav.fingerprint(members)
+  local parts = {}
+  for _, member in ipairs(members) do
+    parts[#parts + 1] = ("%d/%d/%d/%d/%d/%d/%d"):format(member.species,
+      member.level, member.hp, member.stats.hp, member.dvs.attack,
+      member.dvs.defense, member.dvs.speed)
+  end
+  return table.concat(parts, ",")
+end
+
 --- Find the party in a save.
 --
--- Nothing is assumed about where it sits. Every offset is tried and the first
--- one whose members all reproduce their own stats wins; on a real save there is
--- exactly one such place, because the formula agreeing five times over for
--- several Pokemon at once does not happen by accident.
+-- Nothing is assumed about where it sits. Every offset is tried and only the
+-- ones whose members all reproduce their own stats survive.
+--
+-- A real Crystal save yields two, because the cartridge keeps a backup copy of
+-- everything it saves. That is not ambiguity: when the copies say the same
+-- thing they are one party written twice, and taking the first is right. When
+-- they disagree the save is mid-write or corrupt, and guessing which half to
+-- believe is not this code's decision to make.
 -- @return members, offset, or nil plus a reason
 function sav.find_party(data, base_stats)
   if #data ~= sav.SIZE then
@@ -219,30 +247,25 @@ function sav.find_party(data, base_stats)
     return nil, "no base stats to check the party against; import a cartridge first"
   end
 
-  local found = {}
-  for at = 0, #data - (2 + sav.PARTY_LIMIT + sav.MEMBER_SIZE) do
-    local members = sav.party_at(data, at, base_stats)
-    if members then
-      found[#found + 1] = { at = at, members = members }
-    end
-  end
+  local found = sav.find_parties(data, base_stats)
 
   if #found == 0 then
     return nil, "no party found: no offset holds members whose stats check out"
   end
 
-  -- More than one would mean the check is weaker than it looks, so say so
-  -- rather than taking the first.
-  if #found > 1 then
-    local places = {}
-    for _, entry in ipairs(found) do
-      places[#places + 1] = ("0x%04X"):format(entry.at)
+  local first = sav.fingerprint(found[1].members)
+  for index = 2, #found do
+    if sav.fingerprint(found[index].members) ~= first then
+      local places = {}
+      for _, entry in ipairs(found) do
+        places[#places + 1] = ("0x%04X"):format(entry.at)
+      end
+      return nil, ("%d offsets hold different parties (%s); refusing to guess")
+        :format(#found, table.concat(places, ", "))
     end
-    return nil, ("%d offsets look like a party (%s); refusing to guess")
-      :format(#found, table.concat(places, ", "))
   end
 
-  return found[1].members, found[1].at
+  return found[1].members, found[1].at, #found
 end
 
 --- Turn read members into the party the engine plays with.
@@ -273,15 +296,41 @@ function sav.to_party(members, base_stats, learnset_records)
   return party
 end
 
---- Load a save file from disk.
-function sav.load(path, base_stats)
-  local file = io.open(path, "rb")
+--- Read a save file's bytes.
+--
+-- Takes either a path or the File object a drop gives you, and the difference
+-- matters more than it looks. Lua's io.open goes through the Windows ANSI
+-- codepage, so a path with an accent in it -- "Pokémon - Crystal Version", say,
+-- which is what these files are usually called -- arrives as UTF-8 and does not
+-- open. LOVE's own file handle does not have that problem, so a dropped file is
+-- read through that and only a plain path falls back to io.open.
+function sav.read_file(source)
+  if type(source) == "table" or type(source) == "userdata" then
+    local ok, err = source:open("r")
+    if not ok then
+      return nil, ("could not open the dropped file: %s"):format(tostring(err))
+    end
+    local data = source:read()
+    source:close()
+    return data
+  end
+
+  local file = io.open(source, "rb")
   if not file then
-    return nil, ("could not open %s"):format(tostring(path))
+    return nil, ("could not open %s (a path with an accent in it has to be " ..
+      "dropped on the window rather than named here)"):format(tostring(source))
   end
   local data = file:read("*all")
   file:close()
+  return data
+end
 
+--- Load a save and find its party.
+function sav.load(source, base_stats)
+  local data, why = sav.read_file(source)
+  if not data then
+    return nil, why
+  end
   return sav.find_party(data, base_stats)
 end
 

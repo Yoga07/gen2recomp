@@ -908,27 +908,64 @@ That gives a locator which needs to be told nothing. Every offset in the save is
 tried, and if more than one validates the reader refuses rather than picking the
 first — two matches would mean the check is weaker than it looks.
 
-### Testing a reader with no file to read
+### It works on a real save
 
-The only save on this machine is a Gen 1 Red save, so there was nothing real to
-validate the accepting path against. Two things stood in for it.
+Run against a real Crystal save, the reader recovers the party without being
+told anything about where it sits:
 
-A party is **built from the formula and hidden in 32 KiB of noise at an offset
-the reader is not told**, and has to be found. That tests the search rather than
-the arithmetic. Then the same party is rebuilt with **one stat byte changed by
-one** — the shape stays perfect, only the arithmetic stops agreeing — and it has
-to be refused. That is the test that says the stat check is doing the work, and
-without it the whole thing could pass on shape alone.
+```
+1  TYPHLOSION  L100 359/359 HP  atk 266 def 254 spd 298 spa 316 spd 268
+2  NOCTOWL     L100 403/403 HP  atk 198 def 198 spd 238 spa 250 spd 290
+3  MANTINE     L100 333/333 HP  atk 178 def 238 spd 238 spa 258 spd 378
+4  TYRANITAR   L100 403/403 HP  atk 366 def 318 spd 220 spa 288 spd 298
+5  DELIBIRD    L100 293/293 HP  atk 208 def 188 spd 248 spa 228 spd 188
+6  GRANBULL    L100 383/383 HP  atk 338 def 248 spd 188 spa 218 spd 218
+```
 
-The real Red save covers the other side. Run against it, the reader finds
-nothing: 32 KiB of genuine save data, every offset tried, and no false positive.
-A Gen 1 save has a party in it, just not one laid out this way, so refusing it
-is the right answer and a stronger one than refusing noise.
+That is **36 independent arithmetic agreements** — six members, six stats each —
+against base stats pulled from the cartridge and DVs pulled from the save. It is
+not the sort of thing a wrong reading produces.
 
-What is still missing is a real Gen 2 save to accept. The layout above is the
-documented one and the arithmetic check is self-validating, so a save that
-passes is almost certainly read correctly — but that "almost" has not been
-retired, and it should not be described as though it has.
+### Two copies, which is not ambiguity
+
+The first run on that save refused it: two offsets validated, `0x1A65` and
+`0x2865`, and refusing to choose was the rule. That rule was too blunt. A
+cartridge keeps a **backup copy** of everything it saves, `0xE00` apart here, so
+every real save has two parties in it and the old reader would have refused all
+of them.
+
+Copies that say the same thing are one party written twice, and the first is
+read. Copies that disagree mean a save caught mid-write, and choosing between
+them is genuinely not this code's decision, so that still refuses.
+
+Testing that distinction took two goes. The first attempt corrupted the backup
+and checked it was refused — and it passed for the wrong reason: a corrupt
+backup fails the stat check outright, so it is not a competing answer at all,
+just an absent one. The test now builds a **second valid party at a different
+level**, checks that both are found, and only then checks that the reader
+declines to pick. The corrupt-backup case is kept too, asserting the opposite:
+that a broken copy does *not* stop the good one being read.
+
+### The other tests
+
+A party built from the formula is **hidden in 32 KiB of noise at an offset the
+reader is not told** and has to be found — that tests the search rather than the
+arithmetic. The same party rebuilt with **one stat byte changed by one** has to
+be refused, which is what says the arithmetic is doing the work rather than the
+shape.
+
+The Gen 1 Red save covers the negative: 32 KiB of genuine save data, every
+offset tried, no false positive. A Gen 1 save does contain a party, just not one
+laid out this way, so refusing it is a stronger result than refusing noise.
+
+### One thing worth knowing about paths
+
+These files are usually kept somewhere called "Pokémon - Crystal Version", and
+Lua's `io.open` goes through the Windows ANSI codepage, so a path with an accent
+in it arrives as UTF-8 and does not open. A file dropped on the window comes
+with LOVE's own handle, which does not have that problem, so that is what the
+drop path uses. Naming such a file on the command line still fails, and says so
+rather than reporting that no party was found.
 
 ## The music table, and what is not there
 
