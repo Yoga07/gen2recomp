@@ -32,6 +32,7 @@ local HEADLESS = {
   ["--probe-itemballs"] = "tests.probe_itemballs",
   ["--probe-marts"] = "tests.probe_marts",
   ["--probe-hidden"] = "tests.probe_hidden",
+  ["--probe-vm"] = "tests.probe_vm",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }
@@ -147,7 +148,7 @@ function love.load(args)
           or args[i + 2] == "mart" or args[i + 2] == "buy"
           or args[i + 2] == "sell" or args[i + 2] == "hidden"
           or args[i + 2] == "hiddengone" or args[i + 2] == "quantity"
-          or args[i + 2] == "bulk")
+          or args[i + 2] == "bulk" or args[i + 2] == "script")
           and args[i + 2] or nil,
         frames = 2,
       }
@@ -165,7 +166,9 @@ function love.load(args)
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
     end
-    if state.shot and (state.shot.sign == "hidden"
+    if state.shot and state.shot.sign == "script" then
+      state.game:show_script_demo()
+    elseif state.shot and (state.shot.sign == "hidden"
       or state.shot.sign == "hiddengone") then
       state.game:show_hidden_demo(state.shot.sign == "hiddengone")
     elseif state.shot and (state.shot.sign == "mart"

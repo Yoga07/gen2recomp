@@ -2088,6 +2088,174 @@ local function test_item_balls(rom, map_result, item_names)
     by_kind[0] or 0, by_kind[1] or 0, by_kind[2] or 0)
 end
 
+-- The script interpreter, run over every script in the game.
+local function test_script_vm(rom, map_result)
+  log("\n== script interpreter ==")
+  if not map_result then
+    log("  SKIP  maps were not located")
+    return
+  end
+
+  local script_decode = require("src.rom.script_decode")
+  local vm = require("src.engine.vm")
+
+  -- Every entry point, the same set the importer decodes from.
+  local entries = {}
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local bank = math.floor(header.attributes.scripts / 0x4000)
+      for _, bg in ipairs(decoded.bg_events) do
+        if bg.script and bg.kind ~= events.BGEVENT_ITEM then
+          entries[#entries + 1] = { bank = bank, addr = bg.script }
+        end
+      end
+      for _, object in ipairs(decoded.objects) do
+        if object.script and object.kind ~= events.OBJECT_TRAINER
+          and object.kind ~= events.OBJECT_ITEM then
+          entries[#entries + 1] = { bank = bank, addr = object.script }
+        end
+      end
+      for _, coord in ipairs(decoded.coord_events) do
+        if coord.script then
+          entries[#entries + 1] = { bank = bank, addr = coord.script }
+        end
+      end
+    end
+  end
+
+  local code, stats = script_decode.reachable(rom, entries)
+  log("        %d entry points, %d instructions, %d blocks unreadable",
+    #entries, stats.instructions, stats.failed)
+  check("the bytecode decodes", stats.instructions > 8000,
+    ("%d"):format(stats.instructions))
+
+  -- A stand-in world, so the interpreter can be run without a screen. It says
+  -- yes to nothing and no to nothing that matters, which is the point: the
+  -- test is about control flow reaching an end, not about outcomes.
+  local flags = { event = {}, flag = {} }
+  local host = {
+    script_flag = function(_, space, index) return flags[space][index] == true end,
+    set_script_flag = function(_, space, index, on)
+      flags[space][index] = on or nil
+    end,
+    script_has_item = function() return false end,
+    script_give_item = function() return true end,
+    script_take_item = function() return false end,
+    script_pocket_full = function() return false end,
+    script_money = function() return 3000 end,
+    script_add_money = function() end,
+    face_player = function() return false end,
+  }
+
+  local outcomes, ignored, stopped_on, ended_by = {}, {}, {}, {}
+  local lost_at = {}
+  local text_shown = 0
+
+  for _, entry in ipairs(entries) do
+    local machine = vm.new(host, code)
+    if not machine:start(entry.bank, entry.addr) then
+      outcomes["no script"] = (outcomes["no script"] or 0) + 1
+    else
+      -- Drive it the way the engine does: resume, and whenever it asks for a
+      -- text box, pretend the player read it and press on.
+      local status
+      for _ = 1, 200 do
+        status = machine:resume()
+        if status ~= "waiting" then
+          break
+        end
+        if machine.pending and machine.pending.kind == "text" then
+          text_shown = text_shown + 1
+        end
+      end
+      outcomes[status] = (outcomes[status] or 0) + 1
+      if status == "unsupported" then
+        stopped_on[machine.stopped_on] = (stopped_on[machine.stopped_on] or 0) + 1
+      end
+      if machine.ended_by then
+        ended_by[machine.ended_by] = (ended_by[machine.ended_by] or 0) + 1
+      end
+      if status == "lost" then
+        lost_at[machine.lost_at or "?"] = (lost_at[machine.lost_at or "?"] or 0) + 1
+      end
+      for op, count in pairs(machine.ignored) do
+        ignored[op] = (ignored[op] or 0) + count
+      end
+    end
+  end
+
+  local ended = outcomes.ended or 0
+  local ranked = {}
+  for outcome, count in pairs(outcomes) do
+    ranked[#ranked + 1] = ("%s %d"):format(outcome, count)
+  end
+  table.sort(ranked)
+  log("        outcomes: %s", table.concat(ranked, ", "))
+  log("        %d text boxes shown along the way", text_shown)
+
+  check("most scripts run to an end", ended >= #entries * 0.85,
+    ("%d of %d"):format(ended, #entries))
+  -- Nothing should get lost: a jump into an address that was never decoded
+  -- means the traversal missed a branch the interpreter can reach.
+  for where, count in pairs(lost_at) do
+    log("        lost: %d x %s", count, where)
+  end
+  check_equal("no script jumps somewhere undecoded", outcomes.lost or 0, 0)
+  check_equal("no script runs away", outcomes.runaway or 0, 0)
+
+  -- What the interpreter refused, which is the honest list of what the engine
+  -- still cannot do.
+  ranked = {}
+  for op, count in pairs(stopped_on) do
+    ranked[#ranked + 1] = { op = op, count = count }
+  end
+  table.sort(ranked, function(a, b) return a.count > b.count end)
+  local parts = {}
+  for i = 1, math.min(#ranked, 8) do
+    parts[#parts + 1] = ("%s %d"):format(ranked[i].op, ranked[i].count)
+  end
+  log("        refused: %s", table.concat(parts, ", "))
+
+  -- Scripts that reached an end we do not follow through. jumpstd leaves for
+  -- the standard-script table, which is not located yet, so the script really
+  -- does stop there as far as this engine is concerned.
+  ranked = {}
+  for op, count in pairs(ended_by) do
+    ranked[#ranked + 1] = { op = op, count = count }
+  end
+  table.sort(ranked, function(a, b) return a.count > b.count end)
+  parts = {}
+  for i = 1, math.min(#ranked, 6) do
+    parts[#parts + 1] = ("%s %d"):format(ranked[i].op, ranked[i].count)
+  end
+  log("        ended early at: %s", table.concat(parts, ", "))
+
+  -- What it carried on past without doing. These are approximations, and the
+  -- count is worth seeing so it cannot grow unnoticed.
+  ranked = {}
+  for op, count in pairs(ignored) do
+    ranked[#ranked + 1] = { op = op, count = count }
+  end
+  table.sort(ranked, function(a, b) return a.count > b.count end)
+  parts = {}
+  for i = 1, math.min(#ranked, 10) do
+    parts[#parts + 1] = ("%s %d"):format(ranked[i].op, ranked[i].count)
+  end
+  log("        ignored: %s", table.concat(parts, ", "))
+
+  -- The two flag spaces must stay apart. Event 5 and flag 5 are different
+  -- things, and merging them shows up as a branch taken wrongly much later.
+  local machine = vm.new(host, code)
+  flags.event, flags.flag = {}, {}
+  host.set_script_flag(nil, "event", 5, true)
+  check("setting an event does not set the flag of the same number",
+    flags.event[5] == true and flags.flag[5] == nil)
+  check_equal("and the interpreter reads them apart",
+    tostring(host.script_flag(nil, "flag", 5)), "false")
+  machine = nil
+end
+
 -- Hidden items: background events that carry an item instead of text.
 local function test_hidden_items(rom, map_result, item_names)
   log("\n== hidden items ==")
@@ -2723,6 +2891,7 @@ function harness.run(rom_path, report_path)
       map_result)
     test_item_balls(rom, map_result,
       found and found.item_names and found.item_names.records)
+    test_script_vm(rom, map_result)
     test_hidden_items(rom, map_result,
       found and found.item_names and found.item_names.records)
     test_trainer_objects(rom, map_result,

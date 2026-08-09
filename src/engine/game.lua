@@ -15,6 +15,8 @@ local save = require("src.engine.save")
 local menu = require("src.engine.menu")
 local stages = require("src.engine.stages")
 local bag = require("src.engine.bag")
+local vm = require("src.engine.vm")
+local events_module = require("src.rom.events")
 
 local game = {}
 game.__index = game
@@ -67,6 +69,9 @@ function game.new(game_id, start_index)
   instance.item_records = cache.read(game_id, "item_attributes")
   instance.item_names = cache.read(game_id, "item_names")
   instance.marts = cache.read(game_id, "marts") or {}
+  instance.script_code = cache.read(game_id, "script_code")
+  -- Two separate spaces, because the cartridge treats them as two.
+  instance.script_flags = { event = {}, flag = {} }
   instance.bag = bag.new(instance.item_records, instance.item_names)
   -- What the games start you with. Like the starting bag, this is ours rather
   -- than the cartridge's: the script that sets it is not interpreted.
@@ -112,6 +117,7 @@ function game:save()
     found = self.found,
     bag = self.bag:to_list(),
     money = self.money,
+    script_flags = self.script_flags,
   })
 
   if ok then
@@ -146,6 +152,12 @@ function game:restore()
   self.taken = state.taken or {}
   self.found = state.found or {}
   self.money = state.money or self.money
+  if state.script_flags then
+    self.script_flags = {
+      event = state.script_flags.event or {},
+      flag = state.script_flags.flag or {},
+    }
+  end
   -- A save written before the bag existed has no list, and the starting items
   -- set up in game.new stand rather than the bag coming back empty.
   if state.bag then
@@ -296,6 +308,27 @@ function game:show_mart_demo(mode)
             self:menu_confirm()
           end
           return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+--- Talk to the first NPC whose script the interpreter can actually run.
+-- Goes through `interact`, so this exercises the real path rather than putting
+-- text on screen directly the way the older demos do.
+function game:show_script_demo()
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, object in ipairs(map.objects or {}) do
+        if object.script and not object.trainer and not object.item then
+          self:enter(index, object.x, object.y + 1, "up")
+          self:interact()
+          if self.dialogue then
+            return true
+          end
         end
       end
     end
@@ -946,6 +979,133 @@ function game:facing_item()
   return nil
 end
 
+--------------------------------------------------------------------------------
+-- What the script interpreter is allowed to do to the world.
+--
+-- Kept together and named `script_*` so the interpreter's reach is obvious.
+-- Everything it can change goes through one of these.
+--------------------------------------------------------------------------------
+
+function game:script_flag(space, index)
+  local store = self.script_flags[space]
+  return store and store[index] == true
+end
+
+function game:set_script_flag(space, index, on)
+  self.script_flags[space] = self.script_flags[space] or {}
+  self.script_flags[space][index] = on or nil
+end
+
+function game:script_has_item(item)
+  return self.bag:count(item) > 0
+end
+
+function game:script_give_item(item, quantity)
+  return self.bag:add(item, quantity or 1) >= (quantity or 1)
+end
+
+function game:script_take_item(item, quantity)
+  return self.bag:remove(item, quantity or 1)
+end
+
+function game:script_pocket_full()
+  return self.bag:room_for(0) <= 0
+end
+
+function game:script_money()
+  return self.money
+end
+
+function game:script_add_money(amount)
+  self.money = math.max(0, self.money + amount)
+end
+
+--- Turn whoever is being spoken to towards the player.
+-- The overworld draws NPCs facing down and does not carry a per-object facing
+-- yet, so this is honest about doing nothing rather than pretending.
+function game:face_player()
+  return false
+end
+
+--- Run the script at an address, and keep running it until it wants something.
+function game:run_script(bank, addr)
+  if not self.script_code or not bank or not addr then
+    return false
+  end
+
+  local machine = vm.new(self, self.script_code)
+  if not machine:start(bank, addr) then
+    return false
+  end
+
+  self.script = machine
+  self:advance_script()
+
+  -- A script that ran to the end without saying anything leaves the player
+  -- facing a silent NPC. Reporting failure lets the caller fall back to the
+  -- text pulled out at import, which is better than nothing at all.
+  if not self.script and not self.dialogue and not machine.said_something then
+    return false
+  end
+  return true
+end
+
+--- Push the running script along until it needs the player or finishes.
+function game:advance_script()
+  local machine = self.script
+  if not machine then
+    return
+  end
+
+  -- Bounded, because a script that only ever asks for prompts would otherwise
+  -- spin here rather than at the interpreter's own step limit.
+  for _ = 1, 64 do
+    local status = machine:resume()
+
+    if status ~= "waiting" then
+      -- Anything the interpreter would not carry out is worth saying out loud
+      -- rather than leaving the player facing a silent NPC.
+      if status == "unsupported" then
+        self:notify(("Script stopped at %s."):format(
+          tostring(machine.stopped_on)))
+      end
+      self.script = nil
+      return
+    end
+
+    local pending = machine.pending
+    if pending and pending.kind == "text" then
+      self.dialogue = { pages = pending.pages, page = 1 }
+      return
+    end
+    -- A prompt has nothing of its own to draw, so it just carries on.
+  end
+
+  self.script = nil
+end
+
+--- The script the player is facing, if any.
+-- @return the entry address
+function game:facing_script()
+  local delta = FACING_DELTA[self.player.facing]
+  local x = self.player.cell_x + delta[1]
+  local y = self.player.cell_y + delta[2]
+
+  for _, bg in ipairs(self.map.bg_events or {}) do
+    if bg.x == x and bg.y == y and bg.script
+      and bg.kind ~= events_module.BGEVENT_ITEM then
+      return bg.script
+    end
+  end
+  for _, object in ipairs(self.map.objects or {}) do
+    if object.x == x and object.y == y and object.script
+      and not object.trainer and not object.item then
+      return object.script
+    end
+  end
+  return nil
+end
+
 --- The hidden item the player is facing, if it is still there.
 --
 -- These are background events, so they are found the same way a signpost is
@@ -1262,6 +1422,10 @@ function game:interact()
     self.dialogue.page = self.dialogue.page + 1
     if self.dialogue.page > #self.dialogue.pages then
       self.dialogue = nil
+      -- A script waiting on that text box carries on now it is closed.
+      if self.script then
+        self:advance_script()
+      end
     end
     return
   end
@@ -1294,6 +1458,14 @@ function game:interact()
   local buried = self:facing_hidden()
   if buried then
     self:take_hidden(buried)
+    return
+  end
+
+  -- Run the script if there is one. The text extracted at import is the
+  -- fallback for the scripts the interpreter cannot start, so a signpost still
+  -- reads even where the bytecode is beyond us.
+  local addr = self:facing_script()
+  if addr and self:run_script(self.map.script_bank, addr) then
     return
   end
 

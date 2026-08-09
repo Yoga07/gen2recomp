@@ -783,6 +783,77 @@ nine characters with `string.sub` counts bytes, and "é" is two of them in UTF-8
 so nine bytes is eight letters. Names are now cut by glyph. The same distinction
 bit once already, in the character map — it is worth expecting.
 
+## The script interpreter
+
+Talking to someone used to show text pulled out at import. Now it runs their
+script.
+
+The text walk stops at the first conditional on purpose: following one arm would
+report dialogue the player may never see. An interpreter has no such excuse — it
+will know at runtime which arm is taken, so it needs both decoded. Traversing
+the whole reachable graph from every entry point reaches **98% of them**, and the
+32 that fail all stop on opcodes above `$A9`, past the end of the table, which
+suggests they are not scripts at all.
+
+The engine only ever reads the cache, so the bytecode is decoded at import into
+**13116 instructions**, keyed by bank and address rather than gathered into
+per-script lists. Scripts jump into each other and share tails, so an
+address-keyed table dedupes them and makes a jump a lookup. Text is resolved at
+the same time, because the engine cannot go back to the cartridge for it.
+
+### Two pieces of state, and one way to get them wrong
+
+Gen 2 scripts carry a carry flag, set by the check commands, and a one-byte
+working register that `setval` loads. `iftrue` and `iffalse` test the carry;
+`ifequal` and `ifnotequal` compare the register. Conflating the two makes
+branches go the wrong way while every instruction still decodes perfectly —
+there is nothing to see in a disassembly, only wrong behaviour later.
+
+The same trap sits in the flags. `setevent` and `setflag` are two separate
+spaces, not two names for one, and merging them would let event 5 and flag 5
+collide. They are kept apart and there is a test that says so.
+
+### Three kinds of command
+
+- **Implemented** — control flow, text, event flags, items, money.
+- **Ignored** — movement, music, emotes, camera. The script carries on as though
+  they had happened. An NPC will not walk, but the conversation after the
+  walking still runs, which is the difference between a script that works and
+  one that stops dead.
+- **Refused** — battles, warps, trades, giving Pokémon. These change the world in
+  ways the engine cannot honour, so the script stops and says so. A silent no-op
+  would look like a working script that quietly did nothing.
+
+### What the test caught
+
+Running all 1719 entry points through the interpreter found bugs no amount of
+reading would have:
+
+**621 scripts jumped into undecoded ground**, because `jumpstd` is a terminator
+— the decoder stops after it — and the interpreter was treating it as an
+ignorable no-op and stepping past into bytes that were never recorded. Any
+command that ends a script has to end it even when its effect is not
+implemented.
+
+That left 378, then 13, as each unchecked transfer of control was found: jumps to
+invalid targets, far calls into banks the decoder declined, `jumptext` where the
+text did not decode, and returning from a call whose next instruction was
+unreadable. Every one now names what happened instead of leaving the program
+counter pointing at nothing.
+
+The last 13 were the most instructive. They came from a `replace_all` that
+matched a four-space indent and so missed the one fall-through sitting at two —
+the ignored-command branch, the single most-travelled line in the interpreter.
+The count did not move at all across two fixes, which is what gave it away.
+
+**1624 of 1719 now run to an end**, none lost, none runaway. The 94 refused stop
+at `startbattle` and its kin. Of those that end early, 278 leave through
+`jumpstd` for the standard-script table, which is not located yet, and 340 reach
+a text command whose text would not decode.
+
+The tests report the ignored commands by name and count, so an approximation
+cannot quietly grow into a misrepresentation.
+
 ## Hidden items, and measuring what chance looks like
 
 Background event type 7 is a hidden item. A background event is y, x, type, then

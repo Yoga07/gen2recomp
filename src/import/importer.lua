@@ -20,6 +20,7 @@ local font = require("src.rom.font")
 local encounters = require("src.rom.encounters")
 local trainers = require("src.rom.trainers")
 local marts = require("src.rom.marts")
+local script_decode = require("src.rom.script_decode")
 local learnsets = require("src.rom.learnsets")
 local cache = require("src.import.cache")
 
@@ -357,6 +358,8 @@ function importer.run(path, progress)
                         event_failures = 0, scripts = 0, scripts_read = 0,
                         with_encounters = 0, trainers = 0, items = 0,
                         shopkeepers = 0, hidden = 0 }
+  local script_entries = {}
+  local script_summary = { instructions = 0, entries = 0, failed = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -471,6 +474,33 @@ function importer.run(path, progress)
             end
           end
 
+          -- The interpreter needs to know which bank a map's near pointers are
+          -- relative to, and it only ever sees the cache.
+          record.script_bank = script_bank
+
+          -- Every entry point into the bytecode, for the interpreter to decode
+          -- from. Item balls and hidden items are excluded: their pointers lead
+          -- to data rather than to instructions.
+          for _, bg in ipairs(record.bg_events or {}) do
+            if bg.script and bg.kind ~= events.BGEVENT_ITEM then
+              script_entries[#script_entries + 1] =
+                { bank = script_bank, addr = bg.script }
+            end
+          end
+          for _, object in ipairs(record.objects or {}) do
+            if object.script and object.kind ~= events.OBJECT_TRAINER
+              and object.kind ~= events.OBJECT_ITEM then
+              script_entries[#script_entries + 1] =
+                { bank = script_bank, addr = object.script }
+            end
+          end
+          for _, coord in ipairs(record.coord_events or {}) do
+            if coord.script then
+              script_entries[#script_entries + 1] =
+                { bank = script_bank, addr = coord.script }
+            end
+          end
+
           for index, found in pairs(said.bg) do
             record.bg_events[index].text = pages_of(found)
           end
@@ -483,6 +513,18 @@ function importer.run(path, progress)
 
         records[index] = record
         ::continue::
+      end
+
+      -- The bytecode, decoded once for the whole game. Scripts jump into each
+      -- other across maps, so this is keyed by bank and address rather than
+      -- gathered per map, which dedupes the shared tails as well.
+      if #script_entries > 0 then
+        step("decoding scripts")
+        local code, script_stats = script_decode.reachable(rom, script_entries)
+        script_summary.entries = #script_entries
+        script_summary.instructions = script_stats.instructions
+        script_summary.failed = script_stats.failed
+        cache.write(descriptor.game, "script_code", code)
       end
 
       -- Wild encounters are keyed by (group, number), so they can only be
@@ -584,6 +626,7 @@ function importer.run(path, progress)
     ow_sprites = ow_summary,
     battle_data = battle_summary,
     marts = mart_summary,
+    script_code = script_summary,
     sha1 = sha1,
   }
 end
@@ -646,6 +689,13 @@ function importer.format_report(report)
       :format("trainers", report.maps.trainers)
     lines[#lines + 1] = ("  %-16s %4d item balls, %d hidden items")
       :format("items", report.maps.items, report.maps.hidden)
+  end
+
+  if report.script_code and report.script_code.entries > 0 then
+    lines[#lines + 1] = ("  %-16s %4d instructions from %d entry points, " ..
+      "%d blocks unreadable"):format("bytecode",
+      report.script_code.instructions, report.script_code.entries,
+      report.script_code.failed)
   end
 
   if report.marts and report.marts.count > 0 then

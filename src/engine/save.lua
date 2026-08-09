@@ -126,6 +126,20 @@ function save.write(game, state)
       return flags
     end)(),
     money = state.money,
+    -- The script flags, as two lists of set indices. Sparse numeric keys
+    -- round-trip more predictably as lists, the same as the beaten trainers.
+    script_flags = (function()
+      local out = {}
+      for space, store in pairs(state.script_flags or {}) do
+        local set = {}
+        for index, on in pairs(store) do
+          if on then set[#set + 1] = index end
+        end
+        table.sort(set)
+        out[space] = set
+      end
+      return out
+    end)(),
     saved_at = os.time(),
   }
 
@@ -198,6 +212,15 @@ function save.read(game, base_stats)
     end)(),
     bag = record.bag,
     money = record.money,
+    script_flags = (function()
+      local out = {}
+      for space, set in pairs(record.script_flags or {}) do
+        local store = {}
+        for _, index in ipairs(set) do store[index] = true end
+        out[space] = store
+      end
+      return out
+    end)(),
     saved_at = record.saved_at,
   }
 end
