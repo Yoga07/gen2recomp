@@ -261,20 +261,26 @@ function game:show_trainer_demo()
 end
 
 --- Stand in front of the first shopkeeper found and open their counter.
--- @param buy when true, buy whatever the cursor lands on first
-function game:show_mart_demo(buy)
+-- @param mode nil for the counter itself, "buy" or "sell" to go through with
+--        one transaction on whatever the cursor lands on first
+function game:show_mart_demo(mode)
   for index = 1, self.world:map_count() do
     local map = self.world:map(index)
     if not map.unparsed then
       for _, object in ipairs(map.objects or {}) do
         if object.mart then
           self:enter(index, object.x, object.y + 1, "up")
-          if self:open_mart(object.mart) then
-            if buy then
-              self:menu_confirm()
-            end
-            return true
+          if not self:open_mart(object.mart) then
+            return false
           end
+          if mode == "buy" then
+            self:open_mart_buy(object.mart)
+            self:menu_confirm()
+          elseif mode == "sell" then
+            self:open_mart_sell(object.mart)
+            self:menu_confirm()
+          end
+          return true
         end
       end
     end
@@ -477,6 +483,9 @@ function game:menu_key(key)
       self:open_party()
     elseif self.ui.kind == "pocket" then
       self:open_bag()
+    elseif self.ui.kind == "mart" or self.ui.kind == "sell" then
+      -- Back to the counter, not out of the shop entirely.
+      self:open_mart(self.ui.mart)
     elseif self.ui.kind == "party" or self.ui.kind == "bag" then
       self.ui = { kind = "start", list = menu.new(game.START_ENTRIES, #game.START_ENTRIES) }
     else
@@ -590,10 +599,34 @@ function game:menu_confirm()
     return
   end
 
+  if kind == "mart_menu" then
+    local choice = self.ui.list:selected()
+    if choice == "BUY" then
+      self:open_mart_buy(self.ui.mart)
+    elseif choice == "SELL" then
+      if #self.bag:sellable() > 0 then
+        self:open_mart_sell(self.ui.mart)
+      else
+        self:notify("You have nothing to sell.")
+      end
+    else
+      self:close_menu()
+    end
+    return
+  end
+
   if kind == "mart" then
     local entry = self.ui.stock[self.ui.list.cursor]
     if entry then
       self:buy_item(entry)
+    end
+    return
+  end
+
+  if kind == "sell" then
+    local entry = self.ui.contents[self.ui.list.cursor]
+    if entry then
+      self:sell_item(entry)
     end
     return
   end
@@ -697,6 +730,7 @@ function game:draw_menu()
   -- Party rows and item rows both carry a name and a number, so they need the
   -- full width; the short menus sit in the corner the way the games put them.
   local wide = kind == "party" or kind == "pocket" or kind == "mart"
+    or kind == "sell"
   -- "KEY ITEMS" plus its count does not fit the 76 the short menus use, and a
   -- clipped label is worse than a wider box.
   local width = wide and game.SCREEN_WIDTH or (kind == "bag" and 112 or 76)
@@ -709,22 +743,28 @@ function game:draw_menu()
   love.graphics.rectangle("line", x + 2.5, 2.5, width - 5, height - 5)
 
   if self.ui.list:is_empty() then
-    local empty = (kind == "bag" or kind == "pocket") and "NO ITEMS"
-      or "NO POKEMON"
-    font:draw_codes(self:encode(empty), x + 14, 10)
+    local empty = (kind == "bag" or kind == "pocket" or kind == "sell")
+      and "NO ITEMS" or "NO POKEMON"
+    font:draw_codes(self:encode(empty), x + (wide and 8 or 14), 10)
   end
+
+  -- The wide lists carry a name, a count and a price, which is 19 glyphs at
+  -- eight pixels each. That leaves exactly 160, so the cursor column has to be
+  -- tighter than it is on the short menus.
+  local text_x = x + (wide and 8 or 14)
+  local cursor_x = x + (wide and 1 or 6)
 
   for position, row in ipairs(rows) do
     local y = 8 + (position - 1) * 12
-    font:draw_codes(self:encode(tostring(row.item)), x + 14, y)
+    font:draw_codes(self:encode(tostring(row.item)), text_x, y)
     if row.selected then
       love.graphics.setColor(0.1, 0.1, 0.1)
-      love.graphics.rectangle("fill", x + 6, y + 2, 5, 5)
+      love.graphics.rectangle("fill", cursor_x, y + 2, 5, 5)
     end
   end
 
   -- A shop counter shows what you have to spend, the way the games do.
-  if kind == "mart" then
+  if kind == "mart" or kind == "sell" or kind == "mart_menu" then
     local label = ("MONEY ¥%d"):format(self.money)
     local box_width, box_height = 104, 22
     local box_y = game.SCREEN_HEIGHT - box_height
@@ -814,8 +854,20 @@ function game:facing_mart()
   return nil
 end
 
---- Open a shop's counter.
+game.MART_ENTRIES = { "BUY", "SELL", "QUIT" }
+
+--- Open a shop's counter: buy, sell, or leave.
 function game:open_mart(index)
+  if not self.marts[index] then
+    return false
+  end
+  self.ui = { kind = "mart_menu", mart = index,
+              list = menu.new(game.MART_ENTRIES, #game.MART_ENTRIES) }
+  return true
+end
+
+--- What the shop has for sale.
+function game:open_mart_buy(index)
   local list = self.marts[index]
   if not list then
     return false
@@ -828,12 +880,49 @@ function game:open_mart(index)
     local price = record and record.price or 0
     stock[position] = { item = item, name = name, price = price }
     -- Right-aligned prices would need a width the font does not expose, so the
-    -- name is padded instead.
-    labels[position] = ("%-13s¥%d"):format(name:sub(1, 13), price)
+    -- name is padded instead, by glyphs rather than by bytes.
+    local shown = self:truncate(name, 13)
+    labels[position] = ("%s%s¥%d")
+      :format(shown, (" "):rep(13 - #self:encode(shown) + 1), price)
   end
 
   self.ui = { kind = "mart", mart = index, stock = stock,
               list = menu.new(labels, 6) }
+  return true
+end
+
+--- What the shop will take off you.
+function game:open_mart_sell(index)
+  local contents = self.bag:sellable()
+  local labels = {}
+  for position, entry in ipairs(contents) do
+    -- Nine glyphs of name, then the count and what the shop pays. That is what
+    -- fits across 160 pixels once the cursor column is taken out.
+    local name = self:truncate(entry.name, 9)
+    labels[position] = ("%s%s x%-2d ¥%d")
+      :format(name, (" "):rep(9 - #self:encode(name)), entry.count, entry.price)
+  end
+  self.ui = { kind = "sell", mart = index, contents = contents,
+              list = menu.new(labels, 6) }
+  return true
+end
+
+--- Sell one of whatever the cursor is on.
+function game:sell_item(entry)
+  if not self.bag:remove(entry.item, 1) then
+    return false
+  end
+
+  self.money = self.money + entry.price
+  self:notify(("Sold %s. ¥%d now."):format(entry.name, self.money))
+
+  -- The list has changed underneath the cursor. An emptied bag goes back to the
+  -- counter rather than showing nothing.
+  if #self.bag:sellable() > 0 then
+    self:open_mart_sell(self.ui.mart)
+  else
+    self:open_mart(self.ui.mart)
+  end
   return true
 end
 
@@ -1229,6 +1318,24 @@ function game:throw_ball()
   end
 
   self.battle_lines = lines
+end
+
+--- Cut a string to a number of glyphs, not a number of bytes.
+--
+-- "é" and "¥" are two bytes each in UTF-8, so string.sub counts them twice and
+-- can cut one in half. That is how "POKé BALL" came out of a nine-byte trim as
+-- "POKé BAL": eight letters where nine were asked for.
+function game:truncate(str, glyphs)
+  local out, count, i = {}, 0, 1
+  while i <= #str and count < glyphs do
+    local byte_value = str:byte(i)
+    -- Two-byte sequences start with $C2 or $C3; nothing here needs more.
+    local width = (byte_value == 0xC2 or byte_value == 0xC3) and 2 or 1
+    out[#out + 1] = str:sub(i, i + width - 1)
+    i = i + width
+    count = count + 1
+  end
+  return table.concat(out)
 end
 
 --- Encode plain ASCII into the cartridge's character codes, so runtime messages

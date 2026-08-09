@@ -1745,6 +1745,53 @@ local function test_items(attributes, names)
   check_equal("an emptied stack leaves the pocket", held:count(5), 0)
   check_equal("and the pocket with it", #held:used_pockets(), 2)
 
+  -- Selling. A shop pays half, rounded down, and will not take a key item.
+  local shop = bag.new(attributes, names)
+  shop:add(5, 3)   -- POKe BALL, 200
+  shop:add(18, 1)  -- POTION, 300
+  shop:add(9, 1)   -- ANTIDOTE, 100
+  shop:add(7, 1)   -- BICYCLE, a key item
+  shop:add(243, 1) -- HM01, which cannot be tossed either
+
+  check_equal("a shop pays half for a POKe BALL", shop:sell_price(5), 100)
+  check_equal("and half for a POTION", shop:sell_price(18), 150)
+  check_equal("odd prices round down", shop:sell_price(9),
+    math.floor(attributes[9].price / 2))
+
+  -- Nothing here names a key item: the bit that stops the Bicycle being
+  -- tossed is the same one that stops it being sold.
+  check("the BICYCLE cannot be sold", not shop:can_sell(7))
+  check("nor can an HM", not shop:can_sell(243))
+  check("but a POTION can", shop:can_sell(18))
+
+  local offered = shop:sellable()
+  check_equal("only the sellable things are offered", #offered, 3)
+  local offered_names = {}
+  for _, entry in ipairs(offered) do
+    offered_names[entry.name] = true
+  end
+  check("the key items are held back", offered_names["BICYCLE"] == nil
+    and offered_names["HM01"] == nil)
+
+  -- Everything a shop will take has a price, or it would be sold for nothing.
+  for _, entry in ipairs(offered) do
+    if entry.price <= 0 then
+      check("everything offered is worth something", false, entry.name)
+      break
+    end
+  end
+  check("everything offered is worth something", true)
+
+  -- Nothing in the whole item table is sellable-but-worthless, which is what
+  -- would happen if the two conditions were checked with an "or".
+  local worthless = 0
+  for item = 1, item_data.COUNT do
+    if shop:can_sell(item) and shop:sell_price(item) <= 0 then
+      worthless = worthless + 1
+    end
+  end
+  check_equal("no item is sellable for nothing", worthless, 0)
+
   -- Round trip through the save.
   local restored = bag.from_list(attributes, names, held:to_list())
   check_equal("the bag survives a save", restored:count(18), 99)

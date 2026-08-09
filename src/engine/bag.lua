@@ -102,6 +102,52 @@ function Bag:used_pockets()
   return out
 end
 
+-- A shop pays half what it charges. The halving is a game rule rather than
+-- something the cartridge stores: there is one price per item, and the counter
+-- divides it.
+bag.SELL_DIVISOR = 2
+
+--- What a shop pays for one of an item.
+function Bag:sell_price(item)
+  local record = self.attributes[item]
+  if not record then
+    return 0
+  end
+  return math.floor(record.price / bag.SELL_DIVISOR)
+end
+
+--- Can this item be sold at all?
+--
+-- Two conditions, both read off the cartridge. It has to have a price, and it
+-- has to be something the player is allowed to part with — the same bit that
+-- stops the Bicycle, the Card Key and the HMs being tossed stops them being
+-- sold, which is why no list of key items appears here.
+function Bag:can_sell(item)
+  local record = self.attributes[item]
+  if not record then
+    return false
+  end
+  return record.price > 0 and record.tossable
+end
+
+--- Everything in the bag a shop would take, in item order.
+function Bag:sellable()
+  local out = {}
+  for item, count in pairs(self.stacks) do
+    if self:can_sell(item) then
+      out[#out + 1] = {
+        item = item,
+        name = self:name(item),
+        count = count,
+        price = self:sell_price(item),
+        record = self.attributes[item],
+      }
+    end
+  end
+  table.sort(out, function(a, b) return a.item < b.item end)
+  return out
+end
+
 --- The first ball in the bag, which is what a battle reaches for.
 function Bag:first_ball()
   local balls = self:pocket("balls")

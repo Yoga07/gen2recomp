@@ -764,11 +764,30 @@ That is 27 of 34, not all of them, and the reason is the same one that limits
 the dialogue walk: it stops at conditionals. A shop opened from behind an `if`
 is not reached. The tests assert the count as a floor.
 
+### Selling
+
+There is one price per item and the counter halves it, rounding down, so the
+sell price is a rule rather than a second table to find.
+
+What a shop will take is read off the cartridge and not listed anywhere: an item
+can be sold if it has a price *and* the bit that lets it be tossed is set. That
+one bit is what holds back the Bicycle, the Coin Case, the Card Key and the HMs,
+which is why no enumeration of key items appears in the engine. The conditions
+are checked with an "and", and there is a test that no item in the whole table
+is sellable for nothing, which is what an "or" would have produced.
+
+### One more byte-versus-glyph trap
+
+The sell list showed "POKé BAL" where "POKé BALL" was meant. Trimming a name to
+nine characters with `string.sub` counts bytes, and "é" is two of them in UTF-8,
+so nine bytes is eight letters. Names are now cut by glyph. The same distinction
+bit once already, in the character map — it is worth expecting.
+
 ### What is not there yet
 
 The scripts that hand out items and set your money are not interpreted, so the
 starting bag and the starting ¥3000 are stand-ins written in the engine rather
-than something the cartridge granted. Selling is not implemented, only buying,
-and buying is one at a time rather than by quantity. The hidden items — the ones
-found with the Itemfinder rather than seen on the ground — are a different
-structure that has not been looked at.
+than something the cartridge granted. Buying and selling move one item at a time
+rather than by quantity. The hidden items — the ones found with the Itemfinder
+rather than seen on the ground — are a different structure that has not been
+looked at.

@@ -47,7 +47,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** the bag, and items in battle | working — 4 pockets |
 | Item balls on the ground | working — 178 pickups |
 | Mart inventories | working — 34 shops, 27 shopkeepers |
-| **Engine:** buying at a shop counter | working |
+| **Engine:** shop counters, buying and selling | working |
 | **Engine:** start menu, party list, summary | working |
 | Audio | not started |
 | Reading real .sav files | not started |
@@ -62,12 +62,13 @@ starts a battle, where Z confirms and the arrows pick FIGHT, BALL or RUN — a
 caught Pokemon joins your party. Balls come out of the bag and running out of
 them is a real outcome. Item balls lying on the ground are picked up by facing
 them and pressing Z, and stay picked up. Talking to a shopkeeper opens their
-counter, stocked with what that particular shop sells. X opens the menu — party
-list, summaries, and the bag, whose four pockets are filled from what the
-cartridge says each item is. F5 saves, and the bag and your money go with it; a
-save is loaded automatically.
+counter, stocked with what that particular shop sells; they will buy things back
+at half price, but not your key items. X opens the menu — party list, summaries,
+and the bag, whose four pockets are filled from what the cartridge says each
+item is. F5 saves, and the bag and your money go with it; a save is loaded
+automatically.
 
-338 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+348 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

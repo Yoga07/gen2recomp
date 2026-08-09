@@ -143,7 +143,8 @@ function love.load(args)
           or args[i + 2] == "trainer" or args[i + 2] == "bag"
           or args[i + 2] == "pocket" or args[i + 2] == "balls"
           or args[i + 2] == "item" or args[i + 2] == "itemgone"
-          or args[i + 2] == "mart" or args[i + 2] == "buy")
+          or args[i + 2] == "mart" or args[i + 2] == "buy"
+          or args[i + 2] == "sell")
           and args[i + 2] or nil,
         frames = 2,
       }
@@ -162,8 +163,9 @@ function love.load(args)
       return
     end
     if state.shot and (state.shot.sign == "mart"
-      or state.shot.sign == "buy") then
-      state.game:show_mart_demo(state.shot.sign == "buy")
+      or state.shot.sign == "buy" or state.shot.sign == "sell") then
+      state.game:show_mart_demo(state.shot.sign ~= "mart" and state.shot.sign
+        or nil)
     elseif state.shot and (state.shot.sign == "item"
       or state.shot.sign == "itemgone") then
       state.game:show_item_demo(state.shot.sign == "itemgone")
