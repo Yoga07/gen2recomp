@@ -39,6 +39,7 @@ local HEADLESS = {
   ["--probe-movement"] = "tests.probe_movement",
   ["--probe-audio"] = "tests.probe_audio",
   ["--probe-channels"] = "tests.probe_channels",
+  ["--probe-sav"] = "tests.probe_sav",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }
@@ -222,7 +223,25 @@ function love.load(args)
 end
 
 function love.filedropped(file)
-  state.pending_path = file:getFilename()
+  local path = file:getFilename()
+
+  -- A cartridge save is 32 KiB and goes to the running game rather than the
+  -- importer: it carries a party, not a game.
+  if path:lower():match("%.sav$") or path:lower():match("%.srm$") then
+    if state.screen == "playing" and state.game then
+      local count, why = state.game:import_sav(path)
+      if not count then
+        state.screen = "error"
+        set_lines(("could not read that save\n\n%s\n\npress escape to go back")
+          :format(tostring(why)))
+      end
+    else
+      set_lines("start a game first, then drop a save onto it")
+    end
+    return
+  end
+
+  state.pending_path = path
   state.screen = "importing"
   set_lines("importing...")
 end

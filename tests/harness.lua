@@ -2165,6 +2165,146 @@ local function test_text_codes()
   end)())
 end
 
+-- Reading a real cartridge save.
+local function test_sav(base_stats)
+  log("\n== save files ==")
+  if not base_stats then
+    log("  SKIP  the base stats were not located")
+    return
+  end
+
+  local sav = require("src.engine.sav")
+  local pokemon = require("src.engine.pokemon")
+
+  local function byte(value)
+    return string.char(value % 256)
+  end
+  local function word(value)
+    return byte(math.floor(value / 256)) .. byte(value)
+  end
+
+  -- Build a party member the way the cartridge stores one, with the stats
+  -- worked out by the same formula the reader checks them against.
+  local function member(species, level, dvs, statexp)
+    statexp = statexp or {}
+    local base = base_stats[species]
+    local out = {}
+    out[#out + 1] = byte(species)          -- species
+    out[#out + 1] = byte(0)                -- held item
+    out[#out + 1] = byte(33) .. byte(0) .. byte(0) .. byte(0) -- moves
+    out[#out + 1] = word(0)                -- OT id
+    out[#out + 1] = byte(0) .. byte(0) .. byte(0) -- experience
+    for _, name in ipairs({ "hp", "attack", "defense", "speed", "special" }) do
+      out[#out + 1] = word(statexp[name] or 0)
+    end
+    out[#out + 1] = byte(dvs.attack * 16 + dvs.defense)
+    out[#out + 1] = byte(dvs.speed * 16 + dvs.special)
+    out[#out + 1] = byte(0) .. byte(0) .. byte(0) .. byte(0) -- pp
+    out[#out + 1] = byte(70)               -- friendship
+    out[#out + 1] = byte(0)                -- pokerus
+    out[#out + 1] = word(0)                -- caught data
+    out[#out + 1] = byte(level)            -- level
+    out[#out + 1] = byte(0)                -- status
+    out[#out + 1] = byte(0)                -- unused
+
+    local hp = pokemon.stat(base.hp, pokemon.dv_for(dvs, "hp"), level, "hp",
+      statexp.hp)
+    out[#out + 1] = word(hp)               -- current HP
+    out[#out + 1] = word(hp)               -- max HP
+    for _, name in ipairs(sav.STAT_ORDER) do
+      local pool = name:find("special") and statexp.special or statexp[name]
+      out[#out + 1] = word(pokemon.stat(base[sav.BASE_FIELD[name]],
+        pokemon.dv_for(dvs, name), level, name, pool))
+    end
+
+    local packed = table.concat(out)
+    assert(#packed == sav.MEMBER_SIZE,
+      ("member is %d bytes, expected %d"):format(#packed, sav.MEMBER_SIZE))
+    return packed
+  end
+
+  local dvs = { attack = 13, defense = 9, speed = 15, special = 4 }
+  local party = {
+    { 155, 24 },  -- CYNDAQUIL
+    { 25, 31 },   -- PIKACHU
+    { 251, 70 },  -- CELEBI
+  }
+
+  local function build_party(damage)
+    local list, members = {}, {}
+    for index, entry in ipairs(party) do
+      list[index] = byte(entry[1])
+      members[index] = member(entry[1], entry[2], dvs,
+        index == 2 and { hp = 5000, attack = 12000 } or nil)
+    end
+    -- Count, six species slots however many are filled, then the terminator.
+    local packed = byte(#party) .. table.concat(list)
+      .. string.rep(byte(0), sav.PARTY_LIMIT - #party)
+      .. byte(sav.SPECIES_TERMINATOR)
+      .. table.concat(members)
+
+    if damage then
+      -- Nudge one stat by one. The shape stays perfect; only the arithmetic
+      -- stops agreeing.
+      local at = 2 + sav.PARTY_LIMIT + sav.OFFSETS.attack + 1
+      packed = packed:sub(1, at) ..
+        byte((packed:byte(at + 1) + 1) % 256) .. packed:sub(at + 2)
+    end
+    return packed
+  end
+
+  -- Hide the party in a save full of noise, at an offset the reader is not
+  -- told. Deterministic noise, so a failure is reproducible.
+  local function save_with(block, at)
+    math.randomseed(20260809)
+    local noise = {}
+    for _ = 1, sav.SIZE do
+      noise[#noise + 1] = byte(math.random(0, 255))
+    end
+    local data = table.concat(noise)
+    return data:sub(1, at) .. block .. data:sub(at + #block + 1)
+  end
+
+  local block = build_party(false)
+  local hidden_at = 0x2A3C
+  local data = save_with(block, hidden_at)
+
+  local members, where = sav.find_party(data, base_stats)
+  if check("the party is found without being told where", members ~= nil,
+    tostring(where)) then
+    check_equal("at the offset it was hidden at", where, hidden_at)
+    check_equal("with the right number of members", #members, #party)
+    check_equal("the first is a CYNDAQUIL", members[1].species, 155)
+    check_equal("at the level it was given", members[1].level, 24)
+    check_equal("the last is CELEBI", members[3].species, 251)
+    check_equal("its speed DV survives", members[1].dvs.speed, 15)
+    -- Stat experience feeds the formula, so a member carrying some proves the
+    -- reader is using it rather than ignoring it.
+    check("the trained member has more HP than the untrained formula gives",
+      members[2].stats.hp > pokemon.stat(base_stats[25].hp,
+        pokemon.dv_for(dvs, "hp"), 31, "hp", 0))
+  end
+
+  -- The check that matters. One stat byte off by one, everything else perfect.
+  local damaged = save_with(build_party(true), hidden_at)
+  local found_damaged, why = sav.find_party(damaged, base_stats)
+  check("a party with one stat wrong is refused", found_damaged == nil,
+    tostring(why))
+
+  -- Noise alone holds no party.
+  local empty = save_with("", 0)
+  check("a save of noise holds no party", sav.find_party(empty, base_stats) == nil)
+
+  -- Wrong size is not a save.
+  check("something that is not 32K is refused",
+    sav.find_party(("\0"):rep(1024), base_stats) == nil)
+
+  -- Without a cartridge there is nothing to check against, and guessing is
+  -- worse than refusing.
+  check("without base stats it refuses rather than guessing",
+    sav.find_party(data, nil) == nil)
+end
+
 -- The music table. Located and read; not played.
 local function test_music(rom)
   log("\n== music ==")
@@ -3394,6 +3534,7 @@ function harness.run(rom_path, report_path)
     test_item_balls(rom, map_result,
       found and found.item_names and found.item_names.records)
     test_text_codes()
+    test_sav(found and found.base_stats and found.base_stats.records)
     test_music(rom)
     test_movement(rom, map_result)
     test_script_vm(rom, map_result)

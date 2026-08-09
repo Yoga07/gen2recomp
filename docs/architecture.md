@@ -891,6 +891,45 @@ Wiring them in took the interpreter from 1396 text boxes across a full run to
 **2833**, and `jumpstd` no longer appears among the reasons scripts stop — the
 only two left are the misparsed operands, 3084 and 3853.
 
+## Reading a real cartridge save
+
+A Game Boy save is 32 KiB of battery-backed RAM, and where things sit inside it
+differs between Gold, Silver and Crystal and between localisations. So this uses
+no offsets at all. It searches, and it validates by a much sharper rule than
+"these bytes look plausible".
+
+A party member stores its DVs, its stat experience, its level — **and its
+computed stats**. Those are not independent: the stats follow from the rest
+through the same formula the battle engine already uses. A run of bytes where
+all six stats reproduce from the DVs and level is not a coincidence, and one
+where they do not is not a party, whatever else it resembles.
+
+That gives a locator which needs to be told nothing. Every offset in the save is
+tried, and if more than one validates the reader refuses rather than picking the
+first — two matches would mean the check is weaker than it looks.
+
+### Testing a reader with no file to read
+
+The only save on this machine is a Gen 1 Red save, so there was nothing real to
+validate the accepting path against. Two things stood in for it.
+
+A party is **built from the formula and hidden in 32 KiB of noise at an offset
+the reader is not told**, and has to be found. That tests the search rather than
+the arithmetic. Then the same party is rebuilt with **one stat byte changed by
+one** — the shape stays perfect, only the arithmetic stops agreeing — and it has
+to be refused. That is the test that says the stat check is doing the work, and
+without it the whole thing could pass on shape alone.
+
+The real Red save covers the other side. Run against it, the reader finds
+nothing: 32 KiB of genuine save data, every offset tried, and no false positive.
+A Gen 1 save has a party in it, just not one laid out this way, so refusing it
+is the right answer and a stronger one than refusing noise.
+
+What is still missing is a real Gen 2 save to accept. The layout above is the
+documented one and the arithmetic check is self-validating, so a save that
+passes is almost certainly read correctly — but that "almost" has not been
+retired, and it should not be described as though it has.
+
 ## The music table, and what is not there
 
 A song is a header followed by one command stream per channel. The header is a

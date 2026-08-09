@@ -107,6 +107,20 @@ function game.new(game_id, start_index)
   return instance
 end
 
+--- Replace the party from a real cartridge save.
+-- @return how many members came across, or nil plus a reason
+function game:import_sav(path)
+  local sav = require("src.engine.sav")
+  local members, why = sav.load(path, self.base_stats)
+  if not members then
+    return nil, why
+  end
+
+  self.party = sav.to_party(members, self.base_stats, self.learnset_records)
+  self:notify(("Loaded %d from the cartridge save."):format(#self.party))
+  return #self.party
+end
+
 --- Write the current state to disk.
 -- @return true, or false plus a reason
 function game:save()
