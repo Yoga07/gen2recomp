@@ -21,6 +21,7 @@ local encounters = require("src.rom.encounters")
 local trainers = require("src.rom.trainers")
 local marts = require("src.rom.marts")
 local script_decode = require("src.rom.script_decode")
+local std_scripts = require("src.rom.std_scripts")
 local learnsets = require("src.rom.learnsets")
 local cache = require("src.import.cache")
 
@@ -359,7 +360,7 @@ function importer.run(path, progress)
                         with_encounters = 0, trainers = 0, items = 0,
                         shopkeepers = 0, hidden = 0 }
   local script_entries = {}
-  local script_summary = { instructions = 0, entries = 0, failed = 0 }
+  local script_summary = { instructions = 0, entries = 0, failed = 0, std = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -518,6 +519,22 @@ function importer.run(path, progress)
       -- The bytecode, decoded once for the whole game. Scripts jump into each
       -- other across maps, so this is keyed by bank and address rather than
       -- gathered per map, which dedupes the shared tails as well.
+      -- The standard scripts are entry points too, and they have to be decoded
+      -- or every jumpstd lands in nothing.
+      step("locating standard scripts")
+      local std_result, std_err = std_scripts.locate(rom)
+      if not std_result then
+        failed.std_scripts = std_err
+      else
+        offsets.std_scripts = std_result.offset
+        script_summary.std = std_result.count
+        for _, entry in ipairs(std_result.entries) do
+          script_entries[#script_entries + 1] =
+            { bank = entry.bank, addr = entry.addr }
+        end
+        cache.write(descriptor.game, "std_scripts", std_result.entries)
+      end
+
       if #script_entries > 0 then
         step("decoding scripts")
         local code, script_stats = script_decode.reachable(rom, script_entries)
@@ -696,6 +713,8 @@ function importer.format_report(report)
       "%d blocks unreadable"):format("bytecode",
       report.script_code.instructions, report.script_code.entries,
       report.script_code.failed)
+    lines[#lines + 1] = ("  %-16s %4d standard scripts")
+      :format("std scripts", report.script_code.std)
   end
 
   if report.marts and report.marts.count > 0 then

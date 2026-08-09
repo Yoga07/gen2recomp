@@ -70,6 +70,7 @@ function game.new(game_id, start_index)
   instance.item_names = cache.read(game_id, "item_names")
   instance.marts = cache.read(game_id, "marts") or {}
   instance.script_code = cache.read(game_id, "script_code")
+  instance.std_scripts = cache.read(game_id, "std_scripts")
   -- Two separate spaces, because the cartridge treats them as two.
   instance.script_flags = { event = {}, flag = {} }
   instance.bag = bag.new(instance.item_records, instance.item_names)
@@ -1041,7 +1042,7 @@ function game:run_script(bank, addr)
     return false
   end
 
-  local machine = vm.new(self, self.script_code)
+  local machine = vm.new(self, self.script_code, self.std_scripts)
   if not machine:start(bank, addr) then
     return false
   end

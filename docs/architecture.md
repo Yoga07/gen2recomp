@@ -854,6 +854,52 @@ a text command whose text would not decode.
 The tests report the ignored commands by name and count, so an approximation
 cannot quietly grow into a misrepresentation.
 
+## The standard scripts, and two false tables on the way
+
+`jumpstd` and `callstd` do not carry an address. Their operand is an index into
+a table of the game's common routines, and 278 scripts left through one of them.
+The operands say so on their own: 26 distinct values, all between 0 and 51,
+against five stragglers in the thousands that turn out to be misparsed scripts.
+
+Finding the table took two wrong answers first, and both were wrong for the same
+reason.
+
+**"The bytes decode until a terminator" is far too weak.** Two instructions
+satisfy it, so any pointer landing on a byte that happens to be `$91` passes. One
+candidate had a run of 104 entries, every one of them aimed at the *same* such
+byte. Another had 53 entries whose targets marched forward in a constant
+nine-byte step — a uniform data table, not routines, which vary in length.
+
+Tightening the test to "at least three instructions, and something recognisable
+among them" killed both. What it also did was cut the front off the real table:
+the search reports where a valid *run* starts, which is not where the table
+starts if the first entries are short routines the strict test rejects. Walking
+backwards from the run found 22 more entries and then a wall of zeros.
+
+The table begins at **0x0BC000 — the first byte of bank $2F** — and holds
+**52 entries** of bank-then-address, every one naming bank `$2F`. The highest
+index any script asks for is **51**. Those two numbers were arrived at
+separately, from the map scripts on one side and the cartridge layout on the
+other, and they agree exactly.
+
+The entries read as what they should be: `getcurlandmarkname; opentext;
+farwritetext; waitbutton; closetext; end` is the signpost that tells you where
+you are, and `faceplayer; opentext; farwritetext; promptbutton; checkitem;
+iftrue; ...` is the NPC who asks whether you are carrying something.
+
+Wiring them in took the interpreter from 1396 text boxes across a full run to
+**2833**, and `jumpstd` no longer appears among the reasons scripts stop — the
+only two left are the misparsed operands, 3084 and 3853.
+
+### Answering the question
+
+`yesorno` became the most common ignored command the moment the standard scripts
+were reachable, because so many of them ask something. Leaving it alone was the
+worst option: the carry flag would hold whatever the previous check had set, so
+the branch would depend on unrelated history. The interpreter answers **no** and
+records that it did. Declining is the conservative answer — it is the one that
+does not spend money or take items.
+
 ## The text codes that were costing a third of the dialogue
 
 340 scripts ended at a text command whose text would not decode, which looked

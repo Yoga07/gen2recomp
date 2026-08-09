@@ -264,13 +264,23 @@ function text.decode_dialogue(data, offset, max_bytes)
       if charmap[code] then
         current_codes[#current_codes + 1] = code
       else
-        for i = 1, #glyph do
-          local letter = glyph:sub(i, i):upper()
-          local byte_value = letter:byte()
-          if letter >= "A" and letter <= "Z" then
-            current_codes[#current_codes + 1] = 0x80 + byte_value - 65
-          elseif letter == " " then
-            current_codes[#current_codes + 1] = 0x7F
+        local i = 1
+        while i <= #glyph do
+          -- "é" is two bytes in UTF-8 and is a glyph in its own right. Walking
+          -- this a byte at a time and keeping only A to Z dropped it, so
+          -- "POKéMON" reached the font as "POKMON".
+          if glyph:byte(i) == 0xC3 and glyph:byte(i + 1) == 0xA9 then
+            current_codes[#current_codes + 1] = 0xEA
+            i = i + 2
+          else
+            local letter = glyph:sub(i, i):upper()
+            local byte_value = letter:byte()
+            if letter >= "A" and letter <= "Z" then
+              current_codes[#current_codes + 1] = 0x80 + byte_value - 65
+            elseif letter == " " then
+              current_codes[#current_codes + 1] = 0x7F
+            end
+            i = i + 1
           end
         end
       end

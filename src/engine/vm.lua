@@ -49,10 +49,13 @@ vm.REFUSED = {
 }
 
 --- @param host the game, which supplies the world the script acts on
-function vm.new(host, code)
+function vm.new(host, code, std)
   return setmetatable({
     host = host,
     code = code or {},
+    -- The standard-script table, indexed from 1 for Lua's sake even though the
+    -- cartridge counts from 0.
+    std = std,
     bank = nil,
     pc = nil,
     stack = {},
@@ -187,6 +190,25 @@ function VM:step()
 
   if op == "scall" or op == "farscall" then
     self:call(instruction.target_bank, instruction.target, op)
+    return
+  end
+
+  -- The standard scripts. The operand is an index into a table of the game's
+  -- common routines, not an address, which is why treating it as a pointer got
+  -- nowhere. jumpstd leaves for good; callstd comes back.
+  if op == "jumpstd" or op == "callstd" then
+    local index = word(instruction, 1) + 1
+    local entry = self.std and self.std[index]
+    if not entry then
+      self.status = "ended"
+      self.ended_by = ("%s %d, which is not in the table"):format(op, index - 1)
+      return
+    end
+    if op == "jumpstd" then
+      self:jump(entry.bank, entry.addr, op)
+    else
+      self:call(entry.bank, entry.addr, op)
+    end
     return
   end
 
@@ -345,6 +367,18 @@ function VM:step()
     else
       self.carry = host and host:script_money() >= amount or false
     end
+    self:advance()
+    return
+  end
+
+  -- Asking the player a question. The engine cannot put the choice on screen
+  -- yet, so the interpreter answers no and says so here rather than leaving the
+  -- carry flag holding whatever the last check happened to set -- which would
+  -- make the branch depend on unrelated history. Declining is the conservative
+  -- answer: it is the one that does not spend money or take items.
+  if op == "yesorno" then
+    self.carry = false
+    self.answered_no = (self.answered_no or 0) + 1
     self:advance()
     return
   end

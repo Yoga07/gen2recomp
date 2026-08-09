@@ -2147,6 +2147,22 @@ local function test_text_codes()
     and decoded.pages[1][1].codes
   check("a name placeholder still gives the font something to draw",
     codes ~= nil and #codes == 4)
+
+  -- $54 spells out as POKe with the accent, and the accent has to survive the
+  -- trip into font codes. Walking the placeholder a byte at a time dropped it,
+  -- so POKeMON reached the screen as POKMON.
+  local accented = text.decode_dialogue(
+    block(0x00, 0x54, 0x8C, 0x8E, 0x8D, 0x57), 0)
+  local line = accented and accented.pages[1] and accented.pages[1][1]
+  check_equal("POKe spells out with the accent kept", line and line.text,
+    "POKéMON")
+  check_equal("and reaches the font as seven codes", line and #line.codes, 7)
+  check("the accent is there as its own code", (function()
+    for _, code in ipairs(line and line.codes or {}) do
+      if code == 0xEA then return true end
+    end
+    return false
+  end)())
 end
 
 -- The script interpreter, run over every script in the game.
@@ -2185,6 +2201,33 @@ local function test_script_vm(rom, map_result)
     end
   end
 
+  -- The standard scripts are entry points too, and jumpstd resolves through
+  -- them, so they have to be decoded alongside the map scripts.
+  local std_scripts = require("src.rom.std_scripts")
+  local std_result, std_err = std_scripts.locate(rom)
+  if check("the standard script table was located", std_result ~= nil, std_err) then
+    log("        %d standard scripts at 0x%06X in bank $%02X, %d decode as " ..
+      "routines", std_result.count, std_result.offset, std_result.bank,
+      std_result.real)
+    -- 52 in Crystal, and the highest index any script asks for is 51. That
+    -- agreement between two independently found things is the evidence.
+    check("the table has a few dozen entries", std_result.count >= 40
+      and std_result.count <= 80, ("%d"):format(std_result.count))
+    -- Not all of them, and deliberately so. The routine test wants at least
+    -- three instructions and something recognisable among them, which is the
+    -- strictness that killed two false tables -- one whose 104 entries all
+    -- pointed at the same terminator byte, and one whose targets marched in a
+    -- constant nine-byte step. Being that strict necessarily rejects the
+    -- genuinely short routines too.
+    check("most entries are real routines",
+      std_result.real >= std_result.count * 0.65,
+      ("%d of %d"):format(std_result.real, std_result.count))
+
+    for _, entry in ipairs(std_result.entries) do
+      entries[#entries + 1] = { bank = entry.bank, addr = entry.addr }
+    end
+  end
+
   local code, stats = script_decode.reachable(rom, entries)
   log("        %d entry points, %d instructions, %d blocks unreadable",
     #entries, stats.instructions, stats.failed)
@@ -2214,7 +2257,7 @@ local function test_script_vm(rom, map_result)
   local text_shown = 0
 
   for _, entry in ipairs(entries) do
-    local machine = vm.new(host, code)
+    local machine = vm.new(host, code, std_result and std_result.entries)
     if not machine:start(entry.bank, entry.addr) then
       outcomes["no script"] = (outcomes["no script"] or 0) + 1
     else
@@ -2307,7 +2350,7 @@ local function test_script_vm(rom, map_result)
 
   -- The two flag spaces must stay apart. Event 5 and flag 5 are different
   -- things, and merging them shows up as a branch taken wrongly much later.
-  local machine = vm.new(host, code)
+  local machine = vm.new(host, code, std_result and std_result.entries)
   flags.event, flags.flag = {}, {}
   host.set_script_flag(nil, "event", 5, true)
   check("setting an event does not set the flag of the same number",
