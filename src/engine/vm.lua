@@ -38,7 +38,6 @@ VM.__index = VM
 -- Commands whose effect the engine cannot honour yet. Stopping is the honest
 -- response: the alternative is a script that appears to run and does not.
 vm.REFUSED = {
-  startbattle = true,
   warp = true,
   warpfacing = true,
   newloadmap = true,
@@ -412,6 +411,63 @@ function VM:step()
     self.pending = { kind = "choice" }
     self.status = "waiting"
     self.awaiting_answer = true
+    return
+  end
+
+  -- Battles are set up in two steps: something is loaded, then the fight
+  -- starts. Keeping the loaded side on the interpreter rather than telling the
+  -- host straight away matters, because a script can load a combatant and then
+  -- branch away without ever fighting it.
+  if op == "loadwildmon" then
+    self.loaded = { kind = "wild", species = instruction.args[1] or 0,
+                    level = instruction.args[2] or 5 }
+    self:advance()
+    return
+  end
+
+  if op == "loadtrainer" then
+    self.loaded = { kind = "trainer", class = instruction.args[1] or 0,
+                    id = instruction.args[2] or 0 }
+    self:advance()
+    return
+  end
+
+  if op == "startbattle" then
+    if not self.loaded then
+      self.status = "unsupported"
+      self.stopped_on = "startbattle with nothing loaded"
+      return
+    end
+    if not (host and host.script_start_battle) then
+      self.status = "unsupported"
+      self.stopped_on = op
+      return
+    end
+
+    -- The script stops here and does not move on until the battle is over,
+    -- which is the engine's business rather than the interpreter's. The
+    -- program counter is stepped now so resuming carries on after it.
+    local spec = self.loaded
+    self.loaded = nil
+    self:advance()
+    if self.status ~= "running" then
+      return
+    end
+    if not host:script_start_battle(spec) then
+      self.status = "unsupported"
+      self.stopped_on = ("startbattle (%s)"):format(spec.kind)
+      return
+    end
+    self.pending = { kind = "battle" }
+    self.status = "waiting"
+    return
+  end
+
+  if op == "checkjustbattled" then
+    self.carry = host and host.script_just_battled
+      and host:script_just_battled() or false
+    self:knowing()
+    self:advance()
     return
   end
 

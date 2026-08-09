@@ -1146,6 +1146,32 @@ seven percent. The tests assert the mechanism directly on scripts built for the
 purpose, including that a carry set by an earlier `checkevent` does not survive
 a special.
 
+### Fighting when a script says so
+
+A scripted battle is two commands, not one: something is loaded — a wild
+Pokémon by species and level, or a trainer by class and id — and then
+`startbattle` fights it. Keeping the loaded combatant on the interpreter rather
+than handing it straight to the engine matters, because a script can load one
+and then branch away without ever fighting.
+
+`startbattle` is the first command that has to *wait on the world*. Text waits
+for a button and a question waits for an answer, but both resolve inside the
+same conversation. A battle takes over the screen entirely, and the script
+resumes when it ends — so the interpreter steps its program counter past
+`startbattle` before yielding, and the engine wakes it from `end_battle`.
+
+The outcome is recorded before the wake-up, so `checkjustbattled` on the very
+next instruction reads the right thing.
+
+Blacking out is the exception: it clears the waiting script rather than
+resuming it. The player has been carried out of the building the script was
+running in, and carrying on where it left off would be the wrong story.
+
+This took **unsupported scripts from 95 to 21** and the ones running to an end
+from 1669 to **1743 of 1771**. What still refuses is trades, warps, elevators
+and giving away Pokémon — each of which changes the world in a way the engine
+cannot honour yet.
+
 ### Answering the question
 
 `yesorno` became the most common ignored command the moment the standard scripts

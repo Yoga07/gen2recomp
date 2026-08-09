@@ -2934,6 +2934,10 @@ local function test_script_vm(rom, map_result)
     script_money = function() return 3000 end,
     script_add_money = function() end,
     face_player = function() return false end,
+    -- A battle always starts and is always won, so the scripts that fight can
+    -- be walked past rather than stopping there.
+    script_start_battle = function() return true end,
+    script_just_battled = function() return true end,
   }
 
   local outcomes, ignored, stopped_on, ended_by = {}, {}, {}, {}
@@ -3157,6 +3161,7 @@ local function test_script_vm(rom, map_result)
         if machine.pending and machine.pending.kind == "choice" then
           machine:answer(false)
         end
+        -- A battle resolves and the script carries on.
       end
       specials_run = specials_run + (machine.specials or 0)
       guessed_total = guessed_total + (machine.guessed or 0)
@@ -3167,6 +3172,65 @@ local function test_script_vm(rom, map_result)
   check("most specials cost nothing downstream",
     guessed_total < specials_run * 0.5,
     ("%d guesses from %d specials"):format(guessed_total, specials_run))
+
+  -- Battles started by a script. Built here so the sequence is stated: load a
+  -- combatant, start the fight, and do not move on until it is over.
+  local asked_for = nil
+  local battle_host = {}
+  for key, value in pairs(host) do battle_host[key] = value end
+  battle_host.script_start_battle = function(_, spec)
+    asked_for = spec
+    return true
+  end
+
+  local function battle_code(loader, args)
+    return {
+      [1] = {
+        [0x4000] = { op = loader, opcode = loader == "loadwildmon" and 0x5D
+          or 0x5E, size = 3, args = args },
+        [0x4003] = { op = "startbattle", opcode = 0x5F, size = 1, args = {} },
+        [0x4004] = { op = "checkjustbattled", opcode = 0x67, size = 1,
+                     args = {} },
+        [0x4005] = { op = "end", opcode = 0x91, size = 1, args = {},
+                     ends = true },
+      },
+    }
+  end
+
+  local wild = vm.new(battle_host, battle_code("loadwildmon", { 155, 20 }))
+  wild:start(1, 0x4000)
+  local status = wild:resume()
+  check_equal("a script that fights stops to do it", status, "waiting")
+  check_equal("and says so", wild.pending and wild.pending.kind, "battle")
+  check_equal("the wild Pokémon it loaded is what is asked for",
+    asked_for and asked_for.species, 155)
+  check_equal("at the level it said", asked_for and asked_for.level, 20)
+  -- Resuming is what the engine does when the fight ends.
+  check_equal("and the script carries on afterwards", wild:resume(), "ended")
+
+  asked_for = nil
+  local versus = vm.new(battle_host, battle_code("loadtrainer", { 12, 3 }))
+  versus:start(1, 0x4000)
+  versus:resume()
+  check_equal("a trainer is loaded by class", asked_for and asked_for.class, 12)
+  check_equal("and by id", asked_for and asked_for.id, 3)
+
+  -- Loading and then not fighting must not leave the combatant lying around.
+  local nothing = vm.new(battle_host, {
+    [1] = {
+      [0x4000] = { op = "startbattle", opcode = 0x5F, size = 1, args = {} },
+      [0x4001] = { op = "end", opcode = 0x91, size = 1, args = {}, ends = true },
+    },
+  })
+  nothing:start(1, 0x4000)
+  check_equal("starting a battle with nothing loaded stops the script",
+    nothing:resume(), "unsupported")
+
+  -- A host that cannot fight is told so rather than the script pretending.
+  local unable = vm.new({}, battle_code("loadwildmon", { 155, 20 }))
+  unable:start(1, 0x4000)
+  check_equal("and so does a host that cannot start one", unable:resume(),
+    "unsupported")
 
   -- The two flag spaces must stay apart. Event 5 and flag 5 are different
   -- things, and merging them shows up as a branch taken wrongly much later.

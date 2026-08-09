@@ -411,6 +411,37 @@ function game:show_face_demo(from)
   return false
 end
 
+--- Find a script that starts a battle, and let it.
+function game:show_script_battle_demo()
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, object in ipairs(map.objects or {}) do
+        if object.script and not object.trainer and not object.item then
+          self:enter(index, object.x, object.y + 1, "up")
+          self:interact()
+          -- Read through whatever is said; a fight may be waiting behind it.
+          for _ = 1, 60 do
+            if self.battle then
+              return true
+            end
+            if self.ui and self.ui.kind == "choice" then
+              -- Say yes: the question is usually the one guarding the fight.
+              self:answer_script(true)
+            elseif not self.dialogue and not self.script then
+              break
+            else
+              self:interact()
+            end
+          end
+          self.dialogue, self.script, self.ui = nil, nil, nil
+        end
+      end
+    end
+  end
+  return false
+end
+
 --- Talk to the first NPC whose script asks a question, and stop on the prompt.
 function game:show_yesno_demo()
   for index = 1, self.world:map_count() do
@@ -1175,6 +1206,37 @@ function game:script_object(id)
   return objects[id], id
 end
 
+--- Start the battle a script asked for.
+--
+-- Either a wild Pokémon named outright or a trainer named by class and id, and
+-- both go through the same paths the overworld already uses.
+-- @return true when a battle actually began
+function game:script_start_battle(spec)
+  if spec.kind == "wild" then
+    local base = self.base_stats and self.base_stats[spec.species]
+    if not base or not self:party_leader() then
+      return false
+    end
+    self:wild_encounter({ species = spec.species, level = spec.level })
+    return self.battle ~= nil
+  end
+
+  if spec.kind == "trainer" then
+    -- A script's trainer has no event flag of its own; the script decides
+    -- whether it happens again.
+    return self:start_trainer_battle({
+      class = spec.class, id = spec.id, flag = nil,
+    })
+  end
+
+  return false
+end
+
+--- Did a battle just happen, and was it won?
+function game:script_just_battled()
+  return self.last_battle_won == true
+end
+
 function game:script_flag(space, index)
   local store = self.script_flags[space]
   return store and store[index] == true
@@ -1321,6 +1383,12 @@ function game:advance_script()
     local pending = machine.pending
     if pending and pending.kind == "text" then
       self.dialogue = { pages = pending.pages, page = 1 }
+      return
+    end
+
+    if pending and pending.kind == "battle" then
+      -- The battle is on screen now; the script waits until it is done, and
+      -- end_battle is what wakes it.
       return
     end
 
@@ -2220,6 +2288,9 @@ function game:blackout()
   local lost = math.floor(self.money / 2)
   self.money = self.money - lost
 
+  -- Whatever script started this fight does not get to carry on afterwards:
+  -- the player has been carried out of the building it was running in.
+  self.script = nil
   self:end_battle()
   self:enter(self.respawn or self:default_map())
   self:say({
@@ -2230,11 +2301,22 @@ function game:blackout()
 end
 
 --- Clear away a finished battle.
+--
+-- A script that started the fight has been waiting on it, and this is where it
+-- gets to carry on. The outcome is remembered first, so `checkjustbattled` on
+-- the very next instruction reads the right thing.
 function game:end_battle()
+  local won = self.battle and self.battle.winner == "player"
   self.battle = nil
   self.battle_lines = nil
   self.battle_state = nil
   self.trainer = nil
+  self.last_battle_won = won
+
+  if self.script and self.script.pending
+    and self.script.pending.kind == "battle" then
+    self:advance_script()
+  end
 end
 
 --- Send out the trainer's next Pokémon, if they have one left.

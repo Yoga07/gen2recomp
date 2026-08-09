@@ -158,7 +158,8 @@ function love.load(args)
           or args[i + 2] == "sell" or args[i + 2] == "hidden"
           or args[i + 2] == "hiddengone" or args[i + 2] == "quantity"
           or args[i + 2] == "bulk" or args[i + 2] == "script"
-          or args[i + 2] == "yesno" or args[i + 2] == "faceleft"
+          or args[i + 2] == "yesno" or args[i + 2] == "scriptbattle"
+          or args[i + 2] == "faceleft"
           or args[i + 2] == "faceright")
           and args[i + 2] or nil,
         frames = 2,
@@ -181,6 +182,8 @@ function love.load(args)
       or state.shot.sign == "faceright") then
       state.game:show_face_demo(state.shot.sign == "faceleft" and "left"
         or "right")
+    elseif state.shot and state.shot.sign == "scriptbattle" then
+      state.game:show_script_battle_demo()
     elseif state.shot and state.shot.sign == "yesno" then
       state.game:show_yesno_demo()
     elseif state.shot and state.shot.sign == "script" then
