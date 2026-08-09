@@ -2269,6 +2269,109 @@ local function test_fainting(base_stats)
     against.battle.over == false)
 end
 
+-- Switching, and reaching into the bag mid-fight.
+local function test_battle_menu(base_stats, item_attributes, item_names)
+  log("\n== battle menu ==")
+  if not base_stats or not item_attributes then
+    log("  SKIP  the base stats or item tables were not located")
+    return
+  end
+
+  local game = require("src.engine.game")
+  local pokemon = require("src.engine.pokemon")
+  local bag = require("src.engine.bag")
+
+  local function mon(species, level, hp)
+    local instance = pokemon.new(species, base_stats[species], { level = level })
+    instance.hp = hp == nil and instance.stats.hp or hp
+    return instance
+  end
+
+  local function fake(party)
+    local instance = setmetatable({
+      party = party,
+      money = 3000,
+      species_names = setmetatable({}, { __index = function() return "MON" end }),
+      base_stats = base_stats,
+      item_records = item_attributes,
+      item_names = item_names,
+      bag = bag.new(item_attributes, item_names),
+      replies = 0,
+    }, game)
+    instance.notify = function(self, message) self.notified = message end
+    -- The opponent's answer is counted rather than played out: what is being
+    -- checked is that acting costs the turn, not what the reply was.
+    instance.opponent_replies = function(self) self.replies = self.replies + 1 end
+    return instance
+  end
+
+  -- Switching.
+  local out, spare = mon(155, 10), mon(25, 12)
+  local instance = fake({ out, spare })
+  instance.battle = { player = out, opponent = mon(19, 8), over = false }
+
+  check("switching to the one already out is refused",
+    instance:switch_to(out) == false)
+  check_equal("and nothing is spent on it", instance.replies, 0)
+
+  local fainted = mon(16, 9, 0)
+  instance.party[3] = fainted
+  check("switching to a fainted one is refused",
+    instance:switch_to(fainted) == false)
+
+  check("switching to a healthy one works", instance:switch_to(spare))
+  check_equal("it is the one on the field now", instance.battle.player, spare)
+  check("it starts with fresh stat stages", spare.stages ~= nil)
+  check_equal("and the opponent gets a free move", instance.replies, 1)
+
+  -- Items. A Potion restores its parameter and costs the turn.
+  local hurt = fake({ mon(155, 20, 5) })
+  hurt.battle = { player = hurt.party[1], opponent = mon(19, 8), over = false }
+  hurt.bag:add(18, 2)   -- POTION
+  hurt.bag:add(9, 1)    -- ANTIDOTE
+  hurt.bag:add(5, 3)    -- POKe BALL
+
+  local potion = hurt.bag:pocket("items")
+  local entry
+  for _, candidate in ipairs(potion) do
+    if candidate.item == 18 then entry = candidate end
+  end
+  hurt:use_item_in_battle(entry)
+  check_equal("a potion restores its parameter", hurt.battle.player.hp,
+    5 + item_attributes[18].parameter)
+  check_equal("it leaves the bag", hurt.bag:count(18), 1)
+  check_equal("and using it costs the turn", hurt.replies, 1)
+
+  -- An Antidote reads as a heal in the menu nibble but carries no amount,
+  -- because what it undoes is poison. Treating it as a heal spent the turn to
+  -- recover nothing, which is the bug this guards.
+  local antidote
+  for _, candidate in ipairs(hurt.bag:pocket("items")) do
+    if candidate.item == 9 then antidote = candidate end
+  end
+  check_equal("an antidote's menu nibble does say heal",
+    item_attributes[9].battle_use, "heal")
+  check_equal("but it carries no amount", item_attributes[9].parameter, 0)
+
+  local before_hp, before_turns = hurt.battle.player.hp, hurt.replies
+  hurt:use_item_in_battle(antidote)
+  check_equal("using it changes no HP", hurt.battle.player.hp, before_hp)
+  check_equal("costs no turn", hurt.replies, before_turns)
+  check_equal("stays in the bag", hurt.bag:count(9), 1)
+  check("and says so", hurt.notified ~= nil)
+
+  -- A ball is not for someone else's Pokémon.
+  local ball
+  for _, candidate in ipairs(hurt.bag:pocket("balls")) do
+    ball = ball or candidate
+  end
+  hurt.trainer = { name = "FALKNER" }
+  hurt.close_menu = function() end
+  hurt:use_item_in_battle(ball)
+  check_equal("a ball thrown at a trainer's Pokémon is refused",
+    hurt.bag:count(5), 3)
+end
+
 -- Experience, levelling, and what follows from it.
 local function test_experience(rom, base_stats)
   log("\n== experience ==")
@@ -3882,6 +3985,9 @@ function harness.run(rom_path, report_path)
     test_text_codes()
     test_experience(rom, found and found.base_stats and found.base_stats.records)
     test_fainting(found and found.base_stats and found.base_stats.records)
+    test_battle_menu(found and found.base_stats and found.base_stats.records,
+      found and found.item_attributes and found.item_attributes.records,
+      found and found.item_names and found.item_names.records)
     test_sav(found and found.base_stats and found.base_stats.records)
     test_music(rom)
     test_movement(rom, map_result)

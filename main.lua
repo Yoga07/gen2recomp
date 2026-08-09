@@ -149,7 +149,9 @@ function love.load(args)
           or args[i + 2] == "grass" or args[i + 2] == "catch"
           or args[i + 2] == "catchsave" or args[i + 2] == "party"
           or args[i + 2] == "exp" or args[i + 2] == "blackout"
-          or args[i + 2] == "switch"
+          or args[i + 2] == "switch" or args[i + 2] == "battleparty"
+          or args[i + 2] == "battlebag" or args[i + 2] == "battleswitch"
+          or args[i + 2] == "battleheal"
           or args[i + 2] == "menu" or args[i + 2] == "connection"
           or args[i + 2] == "trainer" or args[i + 2] == "bag"
           or args[i + 2] == "pocket" or args[i + 2] == "balls"
@@ -215,7 +217,10 @@ function love.load(args)
       state.game:open_menu()
     elseif state.shot and (state.shot.sign == "grass" or state.shot.sign == "catch"
       or state.shot.sign == "catchsave" or state.shot.sign == "exp"
-      or state.shot.sign == "blackout" or state.shot.sign == "switch") then
+      or state.shot.sign == "blackout" or state.shot.sign == "switch"
+      or state.shot.sign == "battleparty" or state.shot.sign == "battlebag"
+      or state.shot.sign == "battleswitch"
+      or state.shot.sign == "battleheal") then
       state.game:show_first_encounter(state.shot.sign)
     elseif state.shot and state.shot.sign then
       state.game:show_first_sign(state.shot.sign)
@@ -300,8 +305,12 @@ function love.keypressed(key)
     elseif key == "z" or key == "space" or key == "return" then
       state.game:interact()
     elseif state.game.battle and (key == "up" or key == "w") then
-      state.game:battle_menu_move(-1)
+      state.game:battle_menu_row(-1)
     elseif state.game.battle and (key == "down" or key == "s") then
+      state.game:battle_menu_row(1)
+    elseif state.game.battle and (key == "left" or key == "a") then
+      state.game:battle_menu_move(-1)
+    elseif state.game.battle and (key == "right" or key == "d") then
       state.game:battle_menu_move(1)
     elseif key == "escape" then
       show_idle()

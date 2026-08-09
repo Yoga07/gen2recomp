@@ -610,6 +610,51 @@ function game:show_first_encounter(demo)
                 return true
               end
 
+              -- The battle menus: the party to switch from, and the bag.
+              if (demo == "battleparty" or demo == "battlebag"
+                or demo == "battleswitch" or demo == "battleheal")
+                and self.battle then
+                local base = self.base_stats[25]
+                if base and #self.party < 2 then
+                  self.party[#self.party + 1] =
+                    pokemon.new(25, base, { level = 12 })
+                end
+                self.battle_state = "menu"
+
+                if demo == "battleparty" then
+                  self:open_battle_party()
+                elseif demo == "battleswitch" then
+                  self:open_battle_party()
+                  self.ui.list.cursor = 2
+                  self:menu_confirm()
+                elseif demo == "battleheal" then
+                  -- Sturdy enough to survive the reply, or the healing lines
+                  -- get pushed off the three-line box by the knockout.
+                  local starter = self.base_stats[self.battle.player.species]
+                  self.battle.player = pokemon.new(
+                    self.battle.player.species, starter, { level = 40 })
+                  -- Anything stepping onto the field needs its stat stages,
+                  -- the way the switch paths give them.
+                  self.battle.player.stages = stages.new()
+                  self.party[1] = self.battle.player
+                  self.battle.player.hp = 1
+                  self:open_battle_bag()
+                  self:menu_confirm()
+                  -- Pick something that actually restores HP: the first thing
+                  -- in the pocket is an Antidote, which undoes poison.
+                  for index, entry in ipairs(self.ui.contents or {}) do
+                    if (entry.record.parameter or 0) > 0 then
+                      self.ui.list.cursor = index
+                      break
+                    end
+                  end
+                  self:menu_confirm()
+                else
+                  self:open_battle_bag()
+                end
+                return true
+              end
+
               -- The same, but with a second Pokémon still standing, which
               -- should be sent out rather than ending anything.
               if demo == "switch" and self.battle then
@@ -751,7 +796,12 @@ function game:menu_key(key)
 
   if key == "x" or key == "escape" or key == "backspace" then
     -- Step back one screen rather than closing everything at once.
-    if self.ui.kind == "choice" then
+    if self.ui.kind == "battle_pocket" then
+      self:open_battle_bag()
+    elseif self.ui.kind == "battle_party" or self.ui.kind == "battle_bag" then
+      -- Back to the action menu, not out of the battle.
+      self:close_menu()
+    elseif self.ui.kind == "choice" then
       -- Backing out of a question is answering no, the way it is in the games.
       self:answer_script(false)
     elseif self.ui.kind == "summary" then
@@ -832,8 +882,11 @@ function game:use_item_in_field(entry)
   local record = entry.record
   local leader = self:party_leader()
 
-  if not record or record.field_use ~= "heal" then
-    self:notify(("%s has no use here."):format(entry.name))
+  -- Same distinction the battle path makes: a parameter of zero means the item
+  -- undoes a status rather than damage, and which one is not known yet.
+  if not record or record.field_use ~= "heal"
+    or (record.parameter or 0) <= 0 then
+    self:notify(("%s won't have any effect."):format(entry.name))
     return
   end
 
@@ -920,6 +973,27 @@ function game:menu_confirm()
 
   if kind == "choice" then
     self:answer_script(self.ui.list:selected() == "YES")
+    return
+  end
+
+  if kind == "battle_party" then
+    self:switch_to(self.ui.choices[self.ui.list.cursor])
+    return
+  end
+
+  if kind == "battle_bag" then
+    local which = self.ui.pockets[self.ui.list.cursor]
+    if which then
+      self:open_battle_pocket(which)
+    end
+    return
+  end
+
+  if kind == "battle_pocket" then
+    local entry = self.ui.contents[self.ui.list.cursor]
+    if entry then
+      self:use_item_in_battle(entry)
+    end
     return
   end
 
@@ -1056,7 +1130,7 @@ function game:draw_menu()
   -- Party rows and item rows both carry a name and a number, so they need the
   -- full width; the short menus sit in the corner the way the games put them.
   local wide = kind == "party" or kind == "pocket" or kind == "mart"
-    or kind == "sell"
+    or kind == "sell" or kind == "battle_party" or kind == "battle_pocket"
   -- "KEY ITEMS" plus its count does not fit the 76 the short menus use, and a
   -- clipped label is worse than a wider box.
   local width = wide and game.SCREEN_WIDTH or (kind == "bag" and 112 or 76)
@@ -1074,7 +1148,8 @@ function game:draw_menu()
   love.graphics.rectangle("line", x + 2.5, top + 2.5, width - 5, height - 5)
 
   if self.ui.list:is_empty() then
-    local empty = (kind == "bag" or kind == "pocket" or kind == "sell")
+    local empty = (kind == "bag" or kind == "pocket" or kind == "sell"
+      or kind == "battle_bag" or kind == "battle_pocket")
       and "NO ITEMS" or "NO POKEMON"
     font:draw_codes(self:encode(empty), x + (wide and 8 or 14), top + 10)
   end
@@ -2077,16 +2152,153 @@ function game:wild_encounter(met)
   self.battle_menu = 1
 end
 
-game.BATTLE_ACTIONS = { "FIGHT", "BALL", "RUN" }
+-- Laid out as the games lay it out: two columns, two rows.
+game.BATTLE_ACTIONS = { "FIGHT", "PKMN", "PACK", "RUN" }
+game.BATTLE_COLUMNS = 2
+
+--- The opponent's reply to something that was not an attack.
+--
+-- Switching or reaching into the bag costs the turn, so the opponent gets a
+-- free move. The log is cleared first: it is only emptied at the start of a
+-- full turn, and appending to yesterday's log repeats lines the player has
+-- already read.
+function game:opponent_replies(lines)
+  local opponent = self.battle.opponent
+  if opponent.hp <= 0 or self.battle.over then
+    return
+  end
+
+  self.battle.log = {}
+  local move = opponent.moves[math.random(1, math.max(#opponent.moves, 1))]
+    or pokemon.STRUGGLE
+  self.battle:strike(opponent, self.battle.player, move)
+  for _, line in ipairs(self.battle.log) do
+    lines[#lines + 1] = line
+  end
+end
+
+--- The party, as a menu to switch from.
+function game:open_battle_party()
+  local labels, choices = {}, {}
+  for _, member in ipairs(self.party or {}) do
+    choices[#choices + 1] = member
+    labels[#labels + 1] = self:party_label(member)
+  end
+  self.ui = { kind = "battle_party", choices = choices,
+              list = menu.new(labels, 6) }
+end
+
+--- Send out a different Pokémon.
+function game:switch_to(member)
+  if not member or member == self.battle.player then
+    self:notify("Already out!")
+    return false
+  end
+  if member.hp <= 0 then
+    self:notify(("%s has no energy left!")
+      :format(self.species_names[member.species] or "?"))
+    return false
+  end
+
+  local leaving = self.battle.player
+  self.battle.player = member
+  member.stages = stages.new()
+  self:close_menu()
+
+  local lines = {
+    ("Come back %s!"):format(self.species_names[leaving.species] or "?"),
+    ("Go %s!"):format(self.species_names[member.species] or "?"),
+  }
+  self:opponent_replies(lines)
+  self.battle_lines = lines
+  self.battle_state = "message"
+  return true
+end
+
+--- The bag, as a menu to reach into mid-fight.
+function game:open_battle_bag()
+  local used = self.bag:used_pockets()
+  local labels = {}
+  for index, which in ipairs(used) do
+    labels[index] = ("%s %d"):format(game.POCKET_LABELS[which] or which,
+      #self.bag:pocket(which))
+  end
+  self.ui = { kind = "battle_bag", pockets = used, list = menu.new(labels, 4) }
+end
+
+function game:open_battle_pocket(which)
+  local contents = self.bag:pocket(which)
+  local labels = {}
+  for index, entry in ipairs(contents) do
+    labels[index] = ("%s x%d"):format(entry.name, entry.count)
+  end
+  self.ui = { kind = "battle_pocket", pocket = which, contents = contents,
+              list = menu.new(labels, 6) }
+end
+
+--- Use something from the bag during a battle.
+--
+-- What an item does here is the low nibble of its menu byte, the same field the
+-- overworld reads for the high one. Nothing is keyed on an item id.
+function game:use_item_in_battle(entry)
+  local record = entry.record
+  local use = record and record.battle_use
+
+  if use == "ball" then
+    if self.trainer then
+      self:close_menu()
+      self.battle_lines = { "Don't be a thief!" }
+      self.battle_state = "message"
+      return
+    end
+    self:close_menu()
+    self:throw_ball(entry)
+    self.battle_state = "message"
+    return
+  end
+
+  -- The menu nibble says "heal" for anything used on a Pokémon, which lumps
+  -- restoring HP together with curing status: an Antidote reads as a heal and
+  -- carries a parameter of zero, because what it undoes is poison rather than
+  -- damage. Which status each one cures lives in an item-effect table that has
+  -- not been located, so those are refused rather than guessed at -- treating
+  -- them as heals spent the turn to recover nothing.
+  if use ~= "heal" or (record.parameter or 0) <= 0 then
+    self:notify(("%s won't have any effect."):format(entry.name))
+    return
+  end
+
+  local target = self.battle.player
+  if target.hp >= target.stats.hp then
+    self:notify(("%s is already healthy."):format(
+      self.species_names[target.species] or "?"))
+    return
+  end
+
+  local healed = math.min(record.parameter, target.stats.hp - target.hp)
+  target.hp = target.hp + healed
+  self.bag:remove(entry.item, 1)
+  self:close_menu()
+
+  local lines = {
+    ("Used %s."):format(entry.name),
+    ("%s recovered %d HP!"):format(
+      self.species_names[target.species] or "?", healed),
+  }
+  self:opponent_replies(lines)
+  self.battle_lines = lines
+  self.battle_state = "message"
+end
 
 --- Throw a ball at the wild Pokémon.
-function game:throw_ball()
+-- @param chosen the ball picked out of the bag, or nil to reach for the first
+function game:throw_ball(chosen)
   local opponent = self.battle.opponent
 
   -- The ball comes out of the bag now, so running out is a real outcome. Which
   -- ball, and therefore which multiplier, is whichever sits first in the ball
   -- pocket rather than an assumption that it is a plain Poke Ball.
-  local ball = self.bag:first_ball()
+  local ball = chosen or self.bag:first_ball()
   if not ball then
     -- Costs nothing: no ball leaves the bag and the turn is not spent.
     self.battle_lines = { "No BALLS left!" }
@@ -2215,6 +2427,11 @@ function game:battle_menu_move(delta)
   end
   local count = #game.BATTLE_ACTIONS
   self.battle_menu = ((self.battle_menu - 1 + delta) % count) + 1
+end
+
+--- Move the action cursor a row at a time, for a menu laid out in columns.
+function game:battle_menu_row(delta)
+  self:battle_menu_move(delta * game.BATTLE_COLUMNS)
 end
 
 --- Fight with the leader's first move.
@@ -2395,13 +2612,12 @@ function game:battle_advance()
   local action = game.BATTLE_ACTIONS[self.battle_menu] or "FIGHT"
   if action == "FIGHT" then
     self:battle_fight()
-  elseif action == "BALL" then
-    if self.trainer then
-      -- Balls are for wild Pokémon; a trainer's are not yours to take.
-      self.battle_lines = { "Don't be a thief!" }
-    else
-      self:throw_ball()
-    end
+  elseif action == "PKMN" then
+    self:open_battle_party()
+    return
+  elseif action == "PACK" then
+    self:open_battle_bag()
+    return
   elseif self.trainer then
     -- There is no running from a trainer.
     self.battle_lines = { "No running from a", "trainer battle!" }
@@ -2465,13 +2681,19 @@ function game:draw_battle()
   love.graphics.rectangle("line", 2.5, top + 2.5, game.SCREEN_WIDTH - 5, 43)
 
   -- The action menu replaces the message while the player is choosing.
-  if self.battle_state == "menu" and self.bitmap_font then
+  if self.battle_state == "menu" and self.bitmap_font and not self.ui then
+    -- Two columns, two rows, as the games have it. Four in a single column
+    -- would not fit the box.
     for i, action in ipairs(game.BATTLE_ACTIONS) do
-      local y = top + 6 + (i - 1) * 12
-      self.bitmap_font:draw_codes(self:encode(action), 20, y)
+      local column = (i - 1) % game.BATTLE_COLUMNS
+      local row = math.floor((i - 1) / game.BATTLE_COLUMNS)
+      local x = 20 + column * 68
+      local y = top + 10 + row * 14
+      self.bitmap_font:draw_codes(self:encode(action), x, y)
       if i == self.battle_menu then
         love.graphics.setColor(0.1, 0.1, 0.1)
-        love.graphics.rectangle("fill", 10, y + 2, 5, 5)
+        love.graphics.rectangle("fill", x - 10, y + 2, 5, 5)
+        love.graphics.setColor(1, 1, 1)
       end
     end
     love.graphics.setColor(1, 1, 1)
@@ -2520,6 +2742,12 @@ function game:draw(scale)
   -- A battle replaces the overworld entirely.
   if self.battle then
     self:draw_battle()
+    -- The party list and the bag open over the battle, and draw_battle bails
+    -- out early once it has drawn the action menu, so they have to be drawn
+    -- here rather than left to the overworld path below.
+    if self.ui then
+      self:draw_menu()
+    end
     love.graphics.setCanvas()
     love.graphics.setColor(1, 1, 1)
     local bx = math.floor((love.graphics.getWidth() - game.SCREEN_WIDTH * scale) / 2)
