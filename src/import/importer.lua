@@ -356,7 +356,7 @@ function importer.run(path, progress)
   local map_summary = { count = 0, blocks = 0, warps = 0, objects = 0,
                         event_failures = 0, scripts = 0, scripts_read = 0,
                         with_encounters = 0, trainers = 0, items = 0,
-                        shopkeepers = 0 }
+                        shopkeepers = 0, hidden = 0 }
   if tileset_result then
     step("locating maps")
     local map_result, map_err = maps.locate(rom, tileset_result.count)
@@ -455,6 +455,18 @@ function importer.run(path, progress)
               if item then
                 record.objects[index].item = item
                 map_summary.items = map_summary.items + 1
+              end
+            end
+          end
+
+          -- Hidden items: a background event that points at a flag and an item
+          -- rather than at text.
+          for index, bg in ipairs(record.bg_events or {}) do
+            if bg.kind == events.BGEVENT_ITEM and bg.script then
+              local block = events.decode_hidden(rom, script_bank, bg.script)
+              if block then
+                record.bg_events[index].hidden = block
+                map_summary.hidden = map_summary.hidden + 1
               end
             end
           end
@@ -632,8 +644,8 @@ function importer.format_report(report)
       :format("encounters", report.maps.with_encounters)
     lines[#lines + 1] = ("  %-16s %4d trainer objects on maps")
       :format("trainers", report.maps.trainers)
-    lines[#lines + 1] = ("  %-16s %4d item balls on the ground")
-      :format("items", report.maps.items)
+    lines[#lines + 1] = ("  %-16s %4d item balls, %d hidden items")
+      :format("items", report.maps.items, report.maps.hidden)
   end
 
   if report.marts and report.marts.count > 0 then

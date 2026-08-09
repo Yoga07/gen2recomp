@@ -116,6 +116,15 @@ function save.write(game, state)
       table.sort(keys)
       return keys
     end)(),
+    -- Hidden items already turned up. Numeric flags, like the beaten trainers.
+    found = (function()
+      local flags = {}
+      for flag in pairs(state.found or {}) do
+        flags[#flags + 1] = flag
+      end
+      table.sort(flags)
+      return flags
+    end)(),
     money = state.money,
     saved_at = os.time(),
   }
@@ -179,6 +188,13 @@ function save.read(game, base_stats)
         keys[key] = true
       end
       return keys
+    end)(),
+    found = (function()
+      local flags = {}
+      for _, flag in ipairs(record.found or {}) do
+        flags[flag] = true
+      end
+      return flags
     end)(),
     bag = record.bag,
     money = record.money,

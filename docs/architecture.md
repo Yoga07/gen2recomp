@@ -783,11 +783,49 @@ nine characters with `string.sub` counts bytes, and "é" is two of them in UTF-8
 so nine bytes is eight letters. Names are now cut by glyph. The same distinction
 bit once already, in the character map — it is worth expecting.
 
+## Hidden items, and measuring what chance looks like
+
+Background event type 7 is a hidden item. A background event is y, x, type, then
+two bytes, and for the ordinary types those two bytes point at text. For type 7
+they point at something else, and working out what nearly went wrong.
+
+The obvious first reading is that the two bytes hold the item inline. It scored
+**74 of 85**, which looks convincing until you ask what a wrong reading would
+have scored. Only the unused TERU-SAMA slots fail the "is this a real item"
+test, so **222 of 255 byte values pass it — 87%**. And 87% of 85 is 74. That
+reading scored *exactly chance*. Reading the bytes as pointing straight at the
+item, the way an item ball's script does, scored 63 — *below* chance.
+
+| reading | hits out of 85 |
+|---|---|
+| the two bytes are the item | 74 — chance is 74 |
+| they point at the item | 63 — worse than chance |
+| **they point at a flag, then the item** | **85** |
+
+What settled it was giving up on hypotheses and dumping the bytes. The records
+are three long and sit three apart, and the first byte increments along them:
+`88 00 3F`, `89 00 11`, `8A 00 26` at consecutive offsets. That is a two-byte
+event flag followed by the item. The earlier probe had already noticed that "the
+byte after the item is always $00" and treated it as a curiosity — it was the
+flag's high half, and it was the answer.
+
+All 85 decode. The items are the ones Gen 2 buries: Max Potion nine times, Full
+Heal eight, Full Restore seven, Revive six, Rare Candy five. The wrong readings
+produced scattered one-offs, which is its own tell.
+
+The tests keep all three readings and assert the gap between them, so the
+evidence for the layout lives in the suite rather than only in this document.
+
+Finding one is keyed by the cartridge's own event flag, unlike the item balls,
+which are keyed by position. Here the flags are distinct across all but one
+pair, and that pair is the same item reachable from two squares, so sharing a
+key is the behaviour you want.
+
 ### What is not there yet
 
 The scripts that hand out items and set your money are not interpreted, so the
 starting bag and the starting ¥3000 are stand-ins written in the engine rather
 than something the cartridge granted. Buying and selling move one item at a time
-rather than by quantity. The hidden items — the ones found with the Itemfinder
-rather than seen on the ground — are a different structure that has not been
-looked at.
+rather than by quantity. The Itemfinder does not exist, so a hidden item is
+found by pressing the button on the right square rather than by being told which
+square to try.

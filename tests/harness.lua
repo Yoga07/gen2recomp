@@ -2053,6 +2053,100 @@ local function test_item_balls(rom, map_result, item_names)
     by_kind[0] or 0, by_kind[1] or 0, by_kind[2] or 0)
 end
 
+-- Hidden items: background events that carry an item instead of text.
+local function test_hidden_items(rom, map_result, item_names)
+  log("\n== hidden items ==")
+  if not map_result or not item_names then
+    log("  SKIP  maps or item names were not located")
+    return
+  end
+
+  local function real_item(value)
+    return value >= 1 and value <= 255 and item_names[value]
+      and item_names[value] ~= "TERU-SAMA"
+  end
+
+  -- Most byte values name a real item, so "it decodes to an item" is a weak
+  -- test on its own. Measuring the rate is what makes the comparison below
+  -- mean anything: two readings of these bytes score at chance and the third
+  -- scores 100%, and that gap is the evidence.
+  local plausible = 0
+  for value = 1, 255 do
+    if real_item(value) then plausible = plausible + 1 end
+  end
+  local chance = plausible / 255
+  log("        %d of 255 byte values name a real item (%d%%)", plausible,
+    math.floor(chance * 100))
+
+  local total, inline_hits, first_hits, flag_hits = 0, 0, 0, 0
+  local flags, items = {}, {}
+
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local bank = math.floor(header.attributes.scripts / 0x4000)
+      for _, bg in ipairs(decoded.bg_events) do
+        if bg.kind == events.BGEVENT_ITEM then
+          total = total + 1
+
+          -- Reading one: the two bytes are the item inline.
+          local word = bg.script_word or 0
+          if real_item(word % 256) then
+            inline_hits = inline_hits + 1
+          end
+
+          if bg.script then
+            local at = bank * 0x4000 + (bg.script - 0x4000)
+            -- Reading two: they point at the item directly, as an item ball's
+            -- script does.
+            if real_item(rom:u8(at)) then
+              first_hits = first_hits + 1
+            end
+            -- Reading three: they point at a flag, then the item.
+            local block = events.decode_hidden(rom, bank, bg.script)
+            if block and real_item(block.item) then
+              flag_hits = flag_hits + 1
+              flags[block.flag] = (flags[block.flag] or 0) + 1
+              items[item_names[block.item]] =
+                (items[item_names[block.item]] or 0) + 1
+            end
+          end
+        end
+      end
+    end
+  end
+
+  log("        %d hidden items; inline %d, item-at-pointer %d, flag-then-item %d",
+    total, inline_hits, first_hits, flag_hits)
+
+  check("Crystal has dozens of hidden items", total >= 60,
+    ("%d"):format(total))
+  check_equal("every one reads as an item under the flag-then-item layout",
+    flag_hits, total)
+  -- The rivals are what make that number worth something.
+  check("reading the bytes inline does no better than chance",
+    inline_hits <= math.ceil(total * chance) + 2,
+    ("%d of %d, chance is %d"):format(inline_hits, total,
+      math.floor(total * chance)))
+  check("reading them as pointing straight at the item does worse",
+    first_hits < flag_hits, ("%d against %d"):format(first_hits, flag_hits))
+
+  -- The flags are what stop an item being found twice, so they have to be
+  -- nearly all distinct. One pair in Crystal shares a flag.
+  local distinct, shared = 0, 0
+  for _, count in pairs(flags) do
+    distinct = distinct + 1
+    if count > 1 then shared = shared + 1 end
+  end
+  log("        %d distinct flags, %d shared", distinct, shared)
+  check("the flags identify the items", distinct >= total - 2,
+    ("%d flags for %d items"):format(distinct, total))
+
+  -- What is buried should be worth digging up.
+  check("the classic hidden items are there", items["MAX POTION"]
+    and items["FULL HEAL"] and items["RARE CANDY"] and items["FULL RESTORE"])
+end
+
 -- Trainers on maps, and the class table that reaches their parties.
 local function test_trainer_objects(rom, map_result, species_names)
   log("\n== trainers on maps ==")
@@ -2593,6 +2687,8 @@ function harness.run(rom_path, report_path)
       found and found.item_attributes and found.item_attributes.records,
       map_result)
     test_item_balls(rom, map_result,
+      found and found.item_names and found.item_names.records)
+    test_hidden_items(rom, map_result,
       found and found.item_names and found.item_names.records)
     test_trainer_objects(rom, map_result,
       found and found.species_names and found.species_names.records)

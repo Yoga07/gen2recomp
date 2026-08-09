@@ -75,6 +75,8 @@ function game.new(game_id, start_index)
   instance.beaten = {}
   -- Item balls already picked up, keyed by map and object index.
   instance.taken = {}
+  -- Hidden items already turned up, keyed by their own event flag.
+  instance.found = {}
 
   -- A stand-in for what the game's own scripts would hand out. Mum's potion,
   -- the balls from the mart and a key item are enough to exercise every pocket;
@@ -107,6 +109,7 @@ function game:save()
     party = self.party,
     beaten = self.beaten,
     taken = self.taken,
+    found = self.found,
     bag = self.bag:to_list(),
     money = self.money,
   })
@@ -141,6 +144,7 @@ function game:restore()
   self.party = state.party
   self.beaten = state.beaten or {}
   self.taken = state.taken or {}
+  self.found = state.found or {}
   self.money = state.money or self.money
   -- A save written before the bag existed has no list, and the starting items
   -- set up in game.new stand rather than the bag coming back empty.
@@ -279,6 +283,31 @@ function game:show_mart_demo(mode)
           elseif mode == "sell" then
             self:open_mart_sell(object.mart)
             self:menu_confirm()
+          end
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+--- Stand in front of the first hidden item found and turn it up.
+-- @param again when true, try a second time and show the item pocket, which
+--        would show two of it if the flag were not stopping the repeat
+function game:show_hidden_demo(again)
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, bg in ipairs(map.bg_events or {}) do
+        if bg.hidden then
+          self:enter(index, bg.x, bg.y + 1, "up")
+          self:interact()
+          if again then
+            self.dialogue = nil
+            self:interact()
+            self.dialogue = nil
+            self:open_pocket(self.bag:pocket_of(bg.hidden.item))
           end
           return true
         end
@@ -839,6 +868,43 @@ function game:facing_item()
   return nil
 end
 
+--- The hidden item the player is facing, if it is still there.
+--
+-- These are background events, so they are found the same way a signpost is
+-- read: stand in front and press the button. The real game wants the Itemfinder
+-- to tell you a spot is worth trying, which is a hint rather than a lock.
+function game:facing_hidden()
+  local delta = FACING_DELTA[self.player.facing]
+  local x = self.player.cell_x + delta[1]
+  local y = self.player.cell_y + delta[2]
+
+  for _, bg in ipairs(self.map.bg_events or {}) do
+    if bg.x == x and bg.y == y and bg.hidden
+      and not self.found[bg.hidden.flag] then
+      return bg.hidden
+    end
+  end
+  return nil
+end
+
+--- Turn up a hidden item.
+function game:take_hidden(block)
+  local name = self.item_names and self.item_names[block.item]
+    or ("item %d"):format(block.item)
+
+  if self.bag:add(block.item, 1) < 1 then
+    self:say({ "You have no room for", ("the %s!"):format(name) })
+    return false
+  end
+
+  -- Keyed by the cartridge's own event flag here, unlike the item balls. The
+  -- flags are distinct across all but one pair, and that pair is the same item
+  -- reachable from two squares, so sharing a key is the right behaviour.
+  self.found[block.flag] = true
+  self:say({ ("Found %s!"):format(name) })
+  return true
+end
+
 --- The shopkeeper the player is facing, if there is one.
 -- @return the mart index
 function game:facing_mart()
@@ -1081,6 +1147,14 @@ function game:interact()
   -- A shopkeeper opens their counter rather than just saying their line.
   local mart = self:facing_mart()
   if mart and self:open_mart(mart) then
+    return
+  end
+
+  -- A hidden item is a background event, so it comes before ordinary text:
+  -- the square it sits on usually has something to say as well.
+  local buried = self:facing_hidden()
+  if buried then
+    self:take_hidden(buried)
     return
   end
 

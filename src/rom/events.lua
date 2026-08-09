@@ -135,6 +135,32 @@ events.bg_types = {
   "item", "copy",
 }
 
+-- Background event type 7 is a hidden item. Its two bytes are a pointer, and
+-- what sits at the far end is a two-byte event flag then the item -- three
+-- bytes, and the records march along three at a time with the flag
+-- incrementing, which is what gave the layout away.
+events.BGEVENT_ITEM = 7
+events.HIDDEN_BLOCK = 3
+
+--- Read the hidden item a background event points at.
+-- @return { flag, item } or nil plus a reason
+function events.decode_hidden(rom, bank, addr)
+  if not addr or addr < 0x4000 or addr > 0x7FFF then
+    return nil, "pointer out of range"
+  end
+  local at = bank * 0x4000 + (addr - 0x4000)
+  if at + events.HIDDEN_BLOCK > rom.size then
+    return nil, "hidden item runs past the ROM"
+  end
+
+  local item = rom:u8(at + 2)
+  if item < 1 then
+    return nil, "item 0 does not exist"
+  end
+
+  return { offset = at, flag = rom:u16le(at), item = item }
+end
+
 local function near_pointer(rom, offset)
   local addr = rom:u16le(offset)
   if addr < 0x4000 or addr > 0x7FFF then
@@ -229,12 +255,17 @@ function events.decode(rom, header)
   local bg_events = {}
   for i = 1, bg_count do
     local kind = rom:u8(at + 2)
+    -- The raw word is kept as well as the pointer. Most background events
+    -- point at text, but a hidden item carries its value in those two bytes
+    -- instead, and near_pointer discards anything that is not an address.
+    local script, raw = near_pointer(rom, at + 3)
     bg_events[i] = {
       y = rom:u8(at),
       x = rom:u8(at + 1),
       kind = kind,
       kind_name = events.bg_types[kind],
-      script = near_pointer(rom, at + 3),
+      script = script,
+      script_word = raw,
     }
     at = at + events.BG_SIZE
   end
