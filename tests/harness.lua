@@ -2405,6 +2405,85 @@ local function test_script_vm(rom, map_result)
   unanswered:resume()
   check("an unanswered question defaults to no", unanswered.carry == false)
 
+  -- A special calls assembly the interpreter cannot run. What it must not do
+  -- is let the branch after it read whatever the last check happened to leave
+  -- behind. Built here rather than found, so the expected behaviour is stated.
+  local synthetic = {
+    [1] = {
+      -- setval 5; special 99; ifequal 5 -> 0x4010; end
+      [0x4000] = { op = "setval", opcode = 0x15, size = 2, args = { 5 } },
+      [0x4002] = { op = "special", opcode = 0x0F, size = 3, args = { 99, 0 } },
+      [0x4005] = { op = "ifequal", opcode = 0x06, size = 4, args = { 5, 0, 0 },
+                   target = 0x4010, target_bank = 1 },
+      [0x4009] = { op = "end", opcode = 0x91, size = 1, args = {}, ends = true },
+      [0x4010] = { op = "end", opcode = 0x91, size = 1, args = {}, ends = true },
+    },
+  }
+
+  local probe_vm = vm.new(host, synthetic)
+  probe_vm:start(1, 0x4000)
+  probe_vm:resume()
+  check_equal("a special clears the register it cannot fill",
+    probe_vm.value, 0)
+  check_equal("so the branch after it is not taken on a stale value",
+    probe_vm.guessed, 1)
+
+  -- The same for the carry flag.
+  local carry_case = {
+    [1] = {
+      [0x4000] = { op = "special", opcode = 0x0F, size = 3, args = { 99, 0 } },
+      [0x4003] = { op = "iftrue", opcode = 0x09, size = 3, args = { 0, 0 },
+                   target = 0x4010, target_bank = 1 },
+      [0x4006] = { op = "end", opcode = 0x91, size = 1, args = {}, ends = true },
+      [0x4010] = { op = "end", opcode = 0x91, size = 1, args = {}, ends = true },
+    },
+  }
+  local carry_vm = vm.new(host, carry_case)
+  carry_vm:start(1, 0x4000)
+  carry_vm.carry = true -- as though an earlier check had set it
+  carry_vm:resume()
+  check("a special clears a carry left by an earlier check",
+    carry_vm.carry == false)
+  check_equal("and that branch is counted as a guess", carry_vm.guessed, 1)
+
+  -- A check that does produce an answer must not be counted as a guess.
+  local honest = {
+    [1] = {
+      [0x4000] = { op = "checkevent", opcode = 0x31, size = 3, args = { 1, 0 } },
+      [0x4003] = { op = "iftrue", opcode = 0x09, size = 3, args = { 0, 0 },
+                   target = 0x4010, target_bank = 1 },
+      [0x4006] = { op = "end", opcode = 0x91, size = 1, args = {}, ends = true },
+      [0x4010] = { op = "end", opcode = 0x91, size = 1, args = {}, ends = true },
+    },
+  }
+  local honest_vm = vm.new(host, honest)
+  honest_vm:start(1, 0x4000)
+  honest_vm:resume()
+  check_equal("a real check is not counted as a guess", honest_vm.guessed, 0)
+
+  -- How much of the game rides on one, across every script.
+  local specials_run, guessed_total = 0, 0
+  for _, entry in ipairs(entries) do
+    local machine = vm.new(host, code, std_result and std_result.entries)
+    flags.event, flags.flag = {}, {}
+    if machine:start(entry.bank, entry.addr) then
+      for _ = 1, 200 do
+        local status = machine:resume()
+        if status ~= "waiting" then break end
+        if machine.pending and machine.pending.kind == "choice" then
+          machine:answer(false)
+        end
+      end
+      specials_run = specials_run + (machine.specials or 0)
+      guessed_total = guessed_total + (machine.guessed or 0)
+    end
+  end
+  log("        %d specials stepped over, %d branches taken on a result the " ..
+    "interpreter did not produce", specials_run, guessed_total)
+  check("most specials cost nothing downstream",
+    guessed_total < specials_run * 0.5,
+    ("%d guesses from %d specials"):format(guessed_total, specials_run))
+
   -- The two flag spaces must stay apart. Event 5 and flag 5 are different
   -- things, and merging them shows up as a branch taken wrongly much later.
   local machine = vm.new(host, code, std_result and std_result.entries)

@@ -891,6 +891,43 @@ Wiring them in took the interpreter from 1396 text boxes across a full run to
 **2833**, and `jumpstd` no longer appears among the reasons scripts stop — the
 only two left are the misparsed operands, 3084 and 3853.
 
+### The special commands, and what is honestly knowable
+
+`special` calls a routine written in assembly. There are **127 distinct ones** in
+the reachable script graph, and they cannot be run from bytecode — there is no
+Z80 interpreter here and the routines are machine code, not script.
+
+The obvious next move is to identify individual ones from context and implement
+those. It does not work, and it is worth recording why rather than leaving it as
+an open invitation. Reading the nearest preceding text for each index gives a
+*scene*, not a routine: indices 48, 50, 51 and 157 all sit beside "A comfy bed!
+Time to sleep", because a bed is a sequence — fade out, heal, fade in, restart
+the music — and every step is its own special. Thirteen different indices appear
+near text about healing, and none dominates. Naming any one of them HealParty
+would be a guess wearing the clothes of a fact, which is the failure this
+document keeps a list of.
+
+What *is* knowable is how much it costs. Measuring where the specials sit:
+
+| what follows a special | share |
+|---|---|
+| nothing within three instructions | **70%** |
+| a branch within two | 24% |
+
+Seven in ten cost nothing at all downstream. The rest feed a conditional, and
+there the old behaviour was quietly wrong: stepping over the special left the
+carry flag holding whatever check ran before it, so the branch followed
+unrelated history.
+
+Now a special clears the carry and the register to a definite no, and records
+that the answer is not a real one. The next conditional to read it counts itself
+as a guess and spends the flag; a genuine check clears it. That turns an unknown
+into a number: across every script in the game, **680 specials are stepped over
+and 45 branches are taken on a result the interpreter did not produce** — under
+seven percent. The tests assert the mechanism directly on scripts built for the
+purpose, including that a carry set by an earlier `checkevent` does not survive
+a special.
+
 ### Answering the question
 
 `yesorno` became the most common ignored command the moment the standard scripts

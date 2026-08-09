@@ -87,6 +87,9 @@ function VM:start(bank, addr)
   self.ignored = {}
   self.said_something = false
   self.ended_by = nil
+  self.unknown_result = false
+  self.guessed = 0
+  self.specials = 0
   self.status = self:instruction() and "running" or "no script"
   return self.status == "running"
 end
@@ -155,6 +158,26 @@ local function word(instruction, index)
   return (args[index] or 0) + (args[index + 1] or 0) * 256
 end
 
+--- Record that the carry and the register now hold a real answer.
+function VM:knowing()
+  self.unknown_result = false
+end
+
+--- Record that they do not: something ran that we could not carry out.
+function VM:not_knowing()
+  self.unknown_result = true
+end
+
+--- Called by every conditional. A branch reading a result the interpreter
+-- never produced is a guess, and guesses are counted rather than hidden. The
+-- flag is spent once read: the next check sets a real value again.
+function VM:note_guess()
+  if self.unknown_result then
+    self.guessed = (self.guessed or 0) + 1
+    self.unknown_result = false
+  end
+end
+
 --- One instruction. Sets self.status and self.pending as needed.
 function VM:step()
   local instruction = self:instruction()
@@ -213,6 +236,7 @@ function VM:step()
   end
 
   if op == "iftrue" or op == "iffalse" then
+    self:note_guess()
     local take = (op == "iftrue") == (self.carry == true)
     if take and instruction.target then
       self:jump(instruction.target_bank, instruction.target, op)
@@ -224,6 +248,7 @@ function VM:step()
 
   if op == "ifequal" or op == "ifnotequal" or op == "ifgreater"
     or op == "ifless" then
+    self:note_guess()
     local operand = instruction.args[1] or 0
     local take
     if op == "ifequal" then
@@ -294,6 +319,7 @@ function VM:step()
   if op == "checkevent" or op == "checkflag" then
     local space = op == "checkevent" and "event" or "flag"
     self.carry = host and host:script_flag(space, word(instruction, 1)) or false
+    self:knowing()
     self:advance()
     return
   end
@@ -310,6 +336,7 @@ function VM:step()
   -- The working register --------------------------------------------------
   if op == "setval" then
     self.value = instruction.args[1] or 0
+    self:knowing()
     self:advance()
     return
   end
@@ -323,6 +350,7 @@ function VM:step()
   if op == "random" then
     local bound = instruction.args[1] or 1
     self.value = bound > 0 and math.random(0, bound - 1) or 0
+    self:knowing()
     self:advance()
     return
   end
@@ -330,6 +358,7 @@ function VM:step()
   -- Items and money -------------------------------------------------------
   if op == "checkitem" then
     self.carry = host and host:script_has_item(instruction.args[1] or 0) or false
+    self:knowing()
     self:advance()
     return
   end
@@ -352,6 +381,7 @@ function VM:step()
 
   if op == "pocketisfull" then
     self.carry = host and host:script_pocket_full() or false
+    self:knowing()
     self:advance()
     return
   end
@@ -395,6 +425,27 @@ function VM:step()
     return
   end
 
+  -- `special` calls a routine written in assembly. It cannot be run from
+  -- bytecode and it will not be: 127 distinct ones are used, and the text
+  -- around them identifies the scene rather than the routine, so naming any
+  -- individual one would be a guess dressed as a fact.
+  --
+  -- What can be done is to stop it being silently wrong. Seven in ten are
+  -- followed by nothing and skipping them costs nothing at all. The rest feed a
+  -- branch, and leaving the carry alone there would make that branch follow
+  -- whatever check ran earlier. So the result is cleared to a definite no, and
+  -- the fact that it is not a real answer is remembered until something reads
+  -- it.
+  if op == "special" then
+    self.carry = false
+    self.value = 0
+    self:not_knowing()
+    self.specials = (self.specials or 0) + 1
+    self.ignored[op] = (self.ignored[op] or 0) + 1
+    self:advance()
+    return
+  end
+
   -- A command that ends the script has to end it even when we do not implement
   -- what it does. jumpstd is the one that matters: it transfers control into
   -- the standard-script table, which is not decoded, and the decoder stops
@@ -414,6 +465,7 @@ end
 --- Answer the question the script is waiting on.
 function VM:answer(yes)
   self.carry = yes and true or false
+  self:knowing()
   self.awaiting_answer = false
   self.answers = (self.answers or 0) + 1
   self:advance()

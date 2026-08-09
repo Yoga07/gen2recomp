@@ -74,7 +74,7 @@ and the bag, whose four pockets are filled from what the cartridge says each
 item is. F5 saves, and the bag and your money go with it; a save is loaded
 automatically.
 
-396 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+402 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 
