@@ -24,6 +24,7 @@ local script_decode = require("src.rom.script_decode")
 local std_scripts = require("src.rom.std_scripts")
 local music = require("src.rom.music")
 local machines = require("src.rom.machines")
+local obstacles = require("src.rom.obstacles")
 local learnsets = require("src.rom.learnsets")
 local cache = require("src.import.cache")
 
@@ -549,6 +550,17 @@ function importer.run(path, progress)
         ::continue::
       end
 
+      -- What the field moves clear away. Found rather than listed: the sprite
+      -- ids are not written down anywhere in this project.
+      local obstacle_result, obstacle_err = obstacles.locate(rom, map_result)
+      if not obstacle_result then
+        failed.obstacles = obstacle_err
+      else
+        map_summary.tree_sprite = obstacle_result.tree
+        map_summary.boulder_sprite = obstacle_result.boulder
+        cache.write(descriptor.game, "obstacles", obstacle_result)
+      end
+
       -- The bytecode, decoded once for the whole game. Scripts jump into each
       -- other across maps, so this is keyed by bank and address rather than
       -- gathered per map, which dedupes the shared tails as well.
@@ -741,6 +753,11 @@ function importer.format_report(report)
       :format("trainers", report.maps.trainers)
     lines[#lines + 1] = ("  %-16s %4d item balls, %d hidden items")
       :format("items", report.maps.items, report.maps.hidden)
+    if report.maps.tree_sprite then
+      lines[#lines + 1] = ("  %-16s cut tree is sprite %d, boulder is %d")
+        :format("obstacles", report.maps.tree_sprite,
+          report.maps.boulder_sprite)
+    end
   end
 
   if report.script_code and report.script_code.entries > 0 then

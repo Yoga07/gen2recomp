@@ -74,6 +74,8 @@ function game.new(game_id, start_index)
   instance.script_code = cache.read(game_id, "script_code")
   -- Which move each HM teaches, read from the cartridge at import.
   instance.hm_moves = cache.read(game_id, "hm_moves") or {}
+  -- Which sprites are the cut tree and the boulder, found at import.
+  instance.obstacles = cache.read(game_id, "obstacles") or {}
   instance.badges = {}
   instance.surfing = false
   instance.std_scripts = cache.read(game_id, "std_scripts")
@@ -408,6 +410,37 @@ function game:show_face_demo(from)
             return true
           end
           self.dialogue, self.script, self.ui = nil, nil, nil
+        end
+      end
+    end
+  end
+  return false
+end
+
+--- Stand in front of a tree or a boulder and use the move on it.
+-- @param which "tree" or "boulder"; @param taught whether the move is known
+function game:show_obstacle_demo(which, taught)
+  local wanted = which == "tree" and self.obstacles.tree
+    or self.obstacles.boulder
+  local move = which == "tree" and "CUT" or "STRENGTH"
+
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, object in ipairs(map.objects or {}) do
+        if object.sprite == wanted
+          and self.world:walkable(map, object.x, object.y + 1) then
+          self:enter(index, object.x, object.y + 1, "up")
+          local leader = self:party_leader()
+          if leader and taught and self.hm_moves[move] then
+            leader.moves[#leader.moves + 1] = self.hm_moves[move]
+          end
+          self:interact()
+          if taught then
+            -- Show the result rather than the announcement.
+            self.dialogue = nil
+          end
+          return true
         end
       end
     end
@@ -1603,6 +1636,94 @@ end
 
 game.SURF_BADGE = 4 -- Fog Badge, in the games
 
+--- The obstacle the player is facing, if it is one.
+-- @return the object, its index, and which kind it is
+function game:facing_obstacle()
+  local delta = FACING_DELTA[self.player.facing]
+  local x = self.player.cell_x + delta[1]
+  local y = self.player.cell_y + delta[2]
+
+  for index, object in ipairs(self.map.objects or {}) do
+    local state = self.objects[("%d:%d"):format(self.map_index, index)]
+    if not (state and state.hidden)
+      and object.x + (state and state.dx or 0) == x
+      and object.y + (state and state.dy or 0) == y then
+      if object.sprite == self.obstacles.tree then
+        return object, index, "tree"
+      elseif object.sprite == self.obstacles.boulder then
+        return object, index, "boulder"
+      end
+    end
+  end
+  return nil
+end
+
+--- Cut a tree down, or set a boulder up to be pushed.
+-- @return true when the interaction was ours
+function game:use_on_obstacle()
+  local object, index, kind = self:facing_obstacle()
+  if not object then
+    return false
+  end
+
+  if kind == "tree" then
+    local member = self:knows_field_move("CUT")
+    if not member then
+      self:say({ "This tree can be", "CUT down." })
+      return true
+    end
+    -- The tree is gone the way a taken item ball is gone: the object stays in
+    -- the map record, and the state says it is no longer there.
+    self:object_state(index).hidden = true
+    self:say({
+      ("%s used CUT!"):format(self.species_names[member.species] or "?"),
+    })
+    return true
+  end
+
+  local member = self:knows_field_move("STRENGTH")
+  if not member then
+    self:say({ "It's a big boulder,", "but something may", "be able to move it." })
+    return true
+  end
+
+  -- Strength does not move the boulder itself; it makes the boulder movable,
+  -- and walking into it afterwards is what pushes.
+  self:object_state(index).movable = true
+  self:say({
+    ("%s used STRENGTH!"):format(self.species_names[member.species] or "?"),
+    "It can move boulders.",
+  })
+  return true
+end
+
+--- Push a boulder the player is walking into.
+-- @return true when a boulder moved and the player may follow
+function game:push_boulder()
+  local object, index, kind = self:facing_obstacle()
+  if not object or kind ~= "boulder" then
+    return false
+  end
+
+  local state = self:object_state(index)
+  if not state.movable then
+    return false
+  end
+
+  -- One cell further on, in the direction being pushed.
+  local delta = FACING_DELTA[self.player.facing]
+  local beyond_x = object.x + state.dx + delta[1]
+  local beyond_y = object.y + state.dy + delta[2]
+  if not self.world:can_enter(self.map, beyond_x, beyond_y, self.surfing) then
+    self:notify("It won't budge.")
+    return false
+  end
+
+  state.dx = state.dx + delta[1]
+  state.dy = state.dy + delta[2]
+  return true
+end
+
 --- Get on the water, or off it.
 function game:toggle_surf()
   local delta = FACING_DELTA[self.player.facing]
@@ -1992,6 +2113,12 @@ function game:interact()
   local block, key = self:facing_item()
   if block then
     self:take_item(block, key)
+    return
+  end
+
+  -- Trees and boulders come before anyone's dialogue: they have none of their
+  -- own, and their scripts only jump to a routine the interpreter cannot run.
+  if self:use_on_obstacle() then
     return
   end
 

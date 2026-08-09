@@ -926,6 +926,51 @@ both facts — who can do it, and whether the badge is held — and the caller
 currently acts on the first. The tests assert both halves separately so the
 distinction cannot blur.
 
+### Cut trees and boulders are not terrain
+
+The obvious place to look for a cut tree is the collision data, and that search
+produced a confident wrong answer. `$B2` appears 2356 times, is classified
+blocking, and **62% of its cells have walkable ground on opposite sides** — the
+shape of a gate. Rendering the map with the most of them showed **long
+horizontal runs of wall across open floor**. A wall line has floor above and
+below every cell of it, so the gate measure was counting a fence as a doorway.
+The statistic was an artefact of the metric, and only looking caught it.
+
+They are objects. What marks them out is that their script goes straight to a
+standard routine and they have no dialogue of their own — an ordinary NPC talks.
+
+That signature is not enough on its own either, and the second wrong answer is
+the more instructive one: **the Pokémon Centre nurse matched it**. Twenty-two of
+her, every one indoors, every one jumping straight to the same routine, and she
+ranked as the most enclosed thing in the game.
+
+What separates her is the routine. Hers greets you; the ones that clear an
+obstacle contain no text at all, because what they do is done in assembly. With
+that filter the answer comes out clean:
+
+| | objects | enclosed |
+|---|---|---|
+| boulder | 24 | **100%** |
+| cut tree | 16 | 37% |
+
+Boulders are a cave and gym-puzzle obstacle, cut trees an outdoor one, and the
+split is not close. No sprite id appears anywhere in this project — the importer
+finds both and the engine uses what it found.
+
+Cutting hides the tree the same way a taken item ball is hidden: the object
+stays in the map record and the runtime state says it is no longer there.
+Strength does not move a boulder; it makes the boulder movable, and walking into
+it afterwards is what pushes, one cell at a time, into anywhere the player could
+themselves have stood.
+
+### Whirlpool
+
+Not done. It is a water tile rather than an object, and which of the water
+collision values it is has not been established — `$21`, `$23`, `$24`, `$27`,
+`$29`, `$2B`, `$2C`, `$30`–`$3B` and `$C0`–`$C7` are all water, and nothing
+seen so far distinguishes a whirlpool among them. Guessing would be the third
+wrong answer in this section rather than the first.
+
 ### Surf
 
 Water was already a distinct collision kind, so riding on it is a matter of

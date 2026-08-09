@@ -2269,6 +2269,80 @@ local function test_fainting(base_stats)
     against.battle.over == false)
 end
 
+-- What the field moves clear away.
+local function test_obstacles(rom, map_result)
+  log("\n== obstacles ==")
+  if not map_result then
+    log("  SKIP  maps were not located")
+    return
+  end
+
+  local obstacles = require("src.rom.obstacles")
+
+  local result, why = obstacles.locate(rom, map_result)
+  if not check("the cut tree and the boulder were found", result ~= nil, why) then
+    return
+  end
+
+  log("        tree is sprite %d (%s), boulder is sprite %d (%s)",
+    result.tree, result.evidence.tree, result.boulder,
+    result.evidence.boulder)
+
+  check("they are two different things", result.tree ~= result.boulder)
+  check("and two different routines", result.tree_std ~= result.boulder_std)
+
+  -- The Pokémon Centre nurse matched everything the first version of this
+  -- looked for: twenty-two of her, all indoors, all jumping straight to one
+  -- routine, so she ranked as the most enclosed thing in the game. What
+  -- separates her is that her routine greets you and an obstacle's says
+  -- nothing, so the routines are checked for text.
+  local events_module = require("src.rom.events")
+  local by_sprite = {}
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events_module.decode(rom, header)
+    if decoded then
+      for _, object in ipairs(decoded.objects) do
+        by_sprite[object.sprite] = (by_sprite[object.sprite] or 0) + 1
+      end
+    end
+  end
+
+  check("there are a couple of dozen trees",
+    (by_sprite[result.tree] or 0) >= 8 and (by_sprite[result.tree] or 0) <= 60,
+    ("%d"):format(by_sprite[result.tree] or 0))
+  check("and a couple of dozen boulders",
+    (by_sprite[result.boulder] or 0) >= 8
+    and (by_sprite[result.boulder] or 0) <= 60,
+    ("%d"):format(by_sprite[result.boulder] or 0))
+
+  -- The split that tells them apart: boulders are underground, trees are not.
+  local function enclosed_share(sprite)
+    local enclosed, total = 0, 0
+    for _, header in ipairs(map_result.headers) do
+      local decoded = not header.unparsed and events_module.decode(rom, header)
+      if decoded then
+        for _, object in ipairs(decoded.objects) do
+          if object.sprite == sprite then
+            total = total + 1
+            if obstacles.ENCLOSED[header.environment_name] then
+              enclosed = enclosed + 1
+            end
+          end
+        end
+      end
+    end
+    return enclosed / math.max(total, 1)
+  end
+
+  local boulder_share = enclosed_share(result.boulder)
+  local tree_share = enclosed_share(result.tree)
+  log("        boulders are %d%% enclosed, trees %d%%",
+    math.floor(boulder_share * 100), math.floor(tree_share * 100))
+  check("boulders are the enclosed ones", boulder_share > tree_share,
+    ("%.2f against %.2f"):format(boulder_share, tree_share))
+  check("and it is not a close call", boulder_share - tree_share > 0.3)
+end
+
 -- The machine list, and the field moves it names.
 local function test_machines(rom, move_names, base_stats)
   log("\n== machines ==")
@@ -4063,6 +4137,7 @@ function harness.run(rom_path, report_path)
     test_text_codes()
     test_experience(rom, found and found.base_stats and found.base_stats.records)
     test_fainting(found and found.base_stats and found.base_stats.records)
+    test_obstacles(rom, map_result)
     test_machines(rom,
       found and found.move_names and found.move_names.records,
       found and found.base_stats and found.base_stats.records)

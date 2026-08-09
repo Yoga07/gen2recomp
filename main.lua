@@ -41,6 +41,7 @@ local HEADLESS = {
   ["--probe-channels"] = "tests.probe_channels",
   ["--probe-sav"] = "tests.probe_sav",
   ["--probe-tmhm"] = "tests.probe_tmhm",
+  ["--probe-terrain"] = "tests.probe_terrain",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }
@@ -163,6 +164,8 @@ function love.load(args)
           or args[i + 2] == "bulk" or args[i + 2] == "script"
           or args[i + 2] == "yesno" or args[i + 2] == "scriptbattle"
           or args[i + 2] == "surf" or args[i + 2] == "nosurf"
+          or args[i + 2] == "cut" or args[i + 2] == "nocut"
+          or args[i + 2] == "strength"
           or args[i + 2] == "faceleft"
           or args[i + 2] == "faceright")
           and args[i + 2] or nil,
@@ -186,6 +189,11 @@ function love.load(args)
       or state.shot.sign == "faceright") then
       state.game:show_face_demo(state.shot.sign == "faceleft" and "left"
         or "right")
+    elseif state.shot and (state.shot.sign == "cut"
+      or state.shot.sign == "nocut" or state.shot.sign == "strength") then
+      state.game:show_obstacle_demo(
+        state.shot.sign == "strength" and "boulder" or "tree",
+        state.shot.sign ~= "nocut")
     elseif state.shot and (state.shot.sign == "surf"
       or state.shot.sign == "nosurf") then
       state.game:show_surf_demo(state.shot.sign == "surf")
