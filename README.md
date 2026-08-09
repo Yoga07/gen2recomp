@@ -30,7 +30,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Wild encounters, grass and water | working — 91 and 62 maps |
 | Trainer parties | working — 532 trainers |
 | Learnsets and evolutions | working — 2215 moves, 113 evolutions |
-| Dialogue text and charmap | working |
+| Dialogue text and charmap | working — 1954 of 1963 text blocks |
 | Font | working — the one hardcoded offset, see docs |
 | Collision: terrain classification | working |
 | **Engine:** overworld rendering, movement, warps | working |
@@ -72,7 +72,7 @@ and the bag, whose four pockets are filled from what the cartridge says each
 item is. F5 saves, and the bag and your money go with it; a save is loaded
 automatically.
 
-373 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+387 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

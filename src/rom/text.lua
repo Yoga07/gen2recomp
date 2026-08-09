@@ -38,12 +38,30 @@ charmap[0x9F] = "]"
 -- from Gen 1. In Crystal those font tiles are blank, so whatever they are they
 -- are not glyphs that draw. Left mapped so text containing them still decodes
 -- rather than being rejected wholesale, but they are not to be trusted.
+--
+-- The contractions really live at $D0 to $D6, found later and confirmed in
+-- context; the accent is at $EA. Nothing needs these six.
 charmap[0xBA] = "<BA>"
 charmap[0xBB] = "'d"
 charmap[0xBC] = "'l"
 charmap[0xBD] = "'s"
 charmap[0xBE] = "'t"
 charmap[0xBF] = "'v"
+-- The English contractions, each one glyph in the font. These were mapped at
+-- $BA to $BF for a long time, copied from Gen 1, where those tiles are blank in
+-- Crystal. They are really here, in alphabetical order, and finding them fixed
+-- a third of the game's dialogue: 784 text blocks stopped decoding at one of
+-- these bytes.
+--
+-- Read straight off the cartridge rather than assumed. "That<D4> a NUGGET"
+-- gives 's, "didn<D5>" gives 't, "they<D3>e" gives 're, "I<D6>e got" gives 've.
+charmap[0xD0] = "'d"
+charmap[0xD1] = "'l"
+charmap[0xD2] = "'m"
+charmap[0xD3] = "'r"
+charmap[0xD4] = "'s"
+charmap[0xD5] = "'t"
+charmap[0xD6] = "'v"
 charmap[0xE0] = "'"
 charmap[0xE1] = "PK"
 charmap[0xE2] = "MN"
@@ -119,6 +137,30 @@ text.substitutions = {
   [0x5E] = "ROCKET",
 }
 
+-- Codes that draw nothing and take no operand.
+--
+-- $75 is the one that mattered: 377 text blocks stopped dead on it. It is not a
+-- glyph. Its font tile is a solid block four rows deep rather than a letter,
+-- it turns up at 172 different positions rather than in one fixed spot, and
+-- every block containing it reads as correct English once it is passed over.
+-- What it actually instructs the text engine to do is not known here, so it is
+-- named for what it does on screen, which is nothing.
+text.silent = {
+  [0x75] = true,
+}
+
+-- Codes that print a string the game holds elsewhere, with the length of the
+-- operand that follows.
+--
+-- $01 gives itself away: the bytes after it read $D099, which is Game Boy work
+-- RAM, so it prints a name out of a buffer. $14 takes no operand and sits
+-- exactly where a name belongs -- "Hello, <14>!" -- so it names a buffer of its
+-- own. Neither is resolved to a real name yet; the save file would have to say.
+text.ram_strings = {
+  [0x01] = 2,
+  [0x14] = 0,
+}
+
 text.controls = {
   [text.START] = "start",
   [text.LINE] = "line",
@@ -157,11 +199,37 @@ function text.decode_dialogue(data, offset, max_bytes)
     lines = {}
   end
 
+  -- Operand bytes belonging to a preceding command are stepped over rather
+  -- than read as characters.
+  local skip = 0
+
   for i = 0, max_bytes - 1 do
     local at = offset + i + 1
     local code = string.byte(data, at)
     if not code then
       return nil
+    end
+
+    if skip > 0 then
+      skip = skip - 1
+      goto continue
+    end
+
+    if text.silent[code] then
+      goto continue
+    end
+
+    if text.ram_strings[code] then
+      skip = text.ram_strings[code]
+      -- Drawn as a placeholder, the same way the player's name is. The codes
+      -- have to be spelled out too, because the bitmap font draws codes and a
+      -- placeholder has no glyph of its own.
+      current[#current + 1] = "<NAME>"
+      for letter = 1, 4 do
+        current_codes[#current_codes + 1] = 0x80 + ("NAME"):byte(letter) - 65
+      end
+      letters = letters + 1
+      goto continue
     end
 
     local control = text.controls[code]
@@ -208,6 +276,8 @@ function text.decode_dialogue(data, offset, max_bytes)
       end
       letters = letters + 1
     end
+
+    ::continue::
   end
 
   return nil

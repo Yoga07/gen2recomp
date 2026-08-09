@@ -2088,6 +2088,67 @@ local function test_item_balls(rom, map_result, item_names)
     by_kind[0] or 0, by_kind[1] or 0, by_kind[2] or 0)
 end
 
+-- The text codes that were missing, checked on bytes built here rather than
+-- found in the cartridge, so the expected reading is stated rather than
+-- discovered.
+local function test_text_codes()
+  log("\n== text codes ==")
+
+  local function block(...)
+    local bytes = {}
+    for _, value in ipairs({ ... }) do
+      bytes[#bytes + 1] = string.char(value)
+    end
+    return table.concat(bytes)
+  end
+
+  local function reads(bytes)
+    local decoded = text.decode_dialogue(bytes, 0)
+    return decoded and text.flatten(decoded) or nil
+  end
+
+  -- The contractions. "didn" then $D5 should read "didn't", which is what the
+  -- cartridge means by it: 366 blocks stopped on $D4 alone.
+  local D = { 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6 }
+  local expect = { "'d", "'l", "'m", "'r", "'s", "'t", "'v" }
+  for index, code in ipairs(D) do
+    check_equal(("$%02X reads %s"):format(code, expect[index]),
+      reads(block(0x00, 0x88, code, 0x57)), "I" .. expect[index])
+  end
+
+  -- $D5 in context, which is how it was identified.
+  check_equal("didn$D5 reads as didn't",
+    reads(block(0x00, 0xA3, 0xA8, 0xA3, 0xAD, 0xD5, 0x57)), "didn't")
+
+  -- $75 draws nothing and is stepped over.
+  check_equal("$75 draws nothing",
+    reads(block(0x00, 0x75, 0x88, 0x57)), "I")
+  check_equal("and does not swallow what follows",
+    reads(block(0x00, 0x88, 0x75, 0x93, 0x57)), "IT")
+
+  -- $14 stands where a name goes, with no operand.
+  check_equal("$14 is a name",
+    reads(block(0x00, 0x87, 0xA8, 0x7F, 0x14, 0xE7, 0x57)), "Hi <NAME>!")
+
+  -- $01 is a name too, but it carries the RAM address it reads from, and those
+  -- two bytes must not be read as letters. $D099 is work RAM, which is what
+  -- gave it away.
+  check_equal("$01 takes a two-byte operand",
+    reads(block(0x00, 0x01, 0x99, 0xD0, 0x7F, 0xA8, 0xB2, 0x57)),
+    "<NAME> is")
+  -- Without the skip, $99 and $D0 would read as "Z" and "'d".
+  check("the operand is not read as text",
+    not (reads(block(0x00, 0x01, 0x99, 0xD0, 0x57)) or ""):find("Z", 1, true))
+
+  -- The codes carry through to what the bitmap font draws, or a placeholder
+  -- would render as nothing.
+  local decoded = text.decode_dialogue(block(0x00, 0x14, 0x57), 0)
+  local codes = decoded and decoded.pages[1] and decoded.pages[1][1]
+    and decoded.pages[1][1].codes
+  check("a name placeholder still gives the font something to draw",
+    codes ~= nil and #codes == 4)
+end
+
 -- The script interpreter, run over every script in the game.
 local function test_script_vm(rom, map_result)
   log("\n== script interpreter ==")
@@ -2891,6 +2952,7 @@ function harness.run(rom_path, report_path)
       map_result)
     test_item_balls(rom, map_result,
       found and found.item_names and found.item_names.records)
+    test_text_codes()
     test_script_vm(rom, map_result)
     test_hidden_items(rom, map_result,
       found and found.item_names and found.item_names.records)

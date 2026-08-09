@@ -33,6 +33,7 @@ local HEADLESS = {
   ["--probe-marts"] = "tests.probe_marts",
   ["--probe-hidden"] = "tests.probe_hidden",
   ["--probe-vm"] = "tests.probe_vm",
+  ["--probe-textfar"] = "tests.probe_textfar",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }

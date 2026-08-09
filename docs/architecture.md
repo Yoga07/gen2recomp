@@ -854,6 +854,68 @@ a text command whose text would not decode.
 The tests report the ignored commands by name and count, so an approximation
 cannot quietly grow into a misrepresentation.
 
+## The text codes that were costing a third of the dialogue
+
+340 scripts ended at a text command whose text would not decode, which looked
+like an indirection the decoder did not know — a pointer to a pointer. It was
+not. Those blocks start with `$00`, which is already the correct opening byte,
+so the pointers were fine and the decoder was choking on something inside.
+
+Walking each failing block by hand and recording the first byte it could not
+account for gave the answer, in context:
+
+| bytes | reads as | so |
+|---|---|---|
+| `That` `$D4` ` a NUGGET` | That's a NUGGET | `$D4` is `'s` |
+| `didn` `$D5` | didn't | `$D5` is `'t` |
+| `they` `$D3` `e` | they're | `$D3` is `'re` |
+| `I` `$D6` `e got` | I've got | `$D6` is `'ve` |
+
+`$D0` to `$D6` are the English contractions, in alphabetical order: `'d 'l 'm
+'r 's 't 'v`. They had been mapped at `$BA` to `$BF`, copied from Gen 1, where
+in Crystal those tiles are blank — the blankness that got them demoted to
+escapes earlier was the clue, and this is where they actually live. Adding them
+fixed 784 blocks on its own.
+
+### Glyph or control, settled by the font again
+
+Two codes were left. `$75` stopped 377 blocks and `$14` stopped 45.
+
+`$14` was easy: it sits exactly where a name belongs — `Hello, <14>!` — and
+maps below the font entirely, so it draws no glyph of its own. `$01` gave itself
+away in the same manner: the two bytes after it read `$D099`, which is Game Boy
+work RAM, so it prints a name out of a buffer and those two bytes are an operand
+rather than letters.
+
+`$75` was the interesting one, and the ink measurement said *glyph* — 32 pixels,
+against 21 for `'d` and 0 for the space. But ink says something is drawn there,
+not that the byte means it. Printing the tile settles it:
+
+```
+$75 -> tile 53      $80 -> tile 64 ('A')
+  ########            ...#....
+  ########            ..#.#...
+  ########            ..#.#...
+  ########            .#...#..
+  ........            .#####..
+  ........            #.....#.
+  ........            #.....#.
+  ........            ........
+```
+
+A solid block four rows deep is not a letter. Combined with `$75` turning up at
+172 different positions rather than one fixed spot, and every block containing
+it reading as correct English once it is passed over, it is a control. What it
+instructs the text engine to do is not known here, so it is named for what it
+does on screen, which is nothing.
+
+**1954 of 1963 text targets now decode, against 873 before.** Text extraction at
+import went from 480 of 2200 scripts to 893, and the interpreter went from
+showing 616 text boxes across a full run to 1396. The nine that still fail all
+carry a `$00` in a position the decoder treats as "this is not dialogue", and
+relaxing that check to win six blocks would weaken a test the whole locator
+leans on.
+
 ## Hidden items, and measuring what chance looks like
 
 Background event type 7 is a hidden item. A background event is y, x, type, then

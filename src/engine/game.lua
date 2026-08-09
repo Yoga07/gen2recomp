@@ -327,7 +327,15 @@ function game:show_script_demo()
           self:enter(index, object.x, object.y + 1, "up")
           self:interact()
           if self.dialogue then
-            return true
+            -- Prefer a line with a contraction in it, since those are what the
+            -- text decoder used to choke on.
+            for _, line in ipairs(self.dialogue.pages[1] or {}) do
+              if (line.text or ""):find("'", 1, true) then
+                return true
+              end
+            end
+            self.dialogue = nil
+            self.script = nil
           end
         end
       end
