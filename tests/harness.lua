@@ -2348,6 +2348,63 @@ local function test_script_vm(rom, map_result)
   end
   log("        ignored: %s", table.concat(parts, ", "))
 
+  -- Answering the questions. A prompt that does not change anything would be
+  -- decoration, so this runs every script twice -- saying yes throughout, then
+  -- no throughout -- and counts the ones that behave differently.
+  local function run_all(say_yes)
+    local signatures, asked = {}, 0
+    for index, entry in ipairs(entries) do
+      local machine = vm.new(host, code, std_result and std_result.entries)
+      flags.event, flags.flag = {}, {}
+      local boxes, status = 0, nil
+      if machine:start(entry.bank, entry.addr) then
+        for _ = 1, 200 do
+          status = machine:resume()
+          if status ~= "waiting" then
+            break
+          end
+          if machine.pending and machine.pending.kind == "text" then
+            boxes = boxes + 1
+          elseif machine.pending and machine.pending.kind == "choice" then
+            asked = asked + 1
+            machine:answer(say_yes)
+          end
+        end
+      end
+      signatures[index] = ("%s/%d/%s"):format(tostring(status), boxes,
+        tostring(machine.ended_by))
+    end
+    return signatures, asked
+  end
+
+  local yes_run, asked_yes = run_all(true)
+  local no_run = run_all(false)
+
+  local differ = 0
+  for index = 1, #entries do
+    if yes_run[index] ~= no_run[index] then
+      differ = differ + 1
+    end
+  end
+
+  log("        %d questions asked; %d scripts end differently depending on " ..
+    "the answer", asked_yes, differ)
+  check("scripts do ask questions", asked_yes > 100,
+    ("%d"):format(asked_yes))
+  check("and the answer changes what happens", differ > 20,
+    ("%d scripts"):format(differ))
+
+  -- Resuming without answering must not leave the carry holding whatever an
+  -- earlier check set, or a branch would follow unrelated history.
+  local unanswered = vm.new(host, code, std_result and std_result.entries)
+  unanswered.carry = true
+  unanswered.pending = { kind = "choice" }
+  unanswered.status = "waiting"
+  unanswered.awaiting_answer = true
+  unanswered.next_pc = nil
+  unanswered:resume()
+  check("an unanswered question defaults to no", unanswered.carry == false)
+
   -- The two flag spaces must stay apart. Event 5 and flag 5 are different
   -- things, and merging them shows up as a branch taken wrongly much later.
   local machine = vm.new(host, code, std_result and std_result.entries)

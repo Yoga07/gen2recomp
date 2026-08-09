@@ -371,15 +371,14 @@ function VM:step()
     return
   end
 
-  -- Asking the player a question. The engine cannot put the choice on screen
-  -- yet, so the interpreter answers no and says so here rather than leaving the
-  -- carry flag holding whatever the last check happened to set -- which would
-  -- make the branch depend on unrelated history. Declining is the conservative
-  -- answer: it is the one that does not spend money or take items.
+  -- Asking the player a question. The interpreter stops and waits rather than
+  -- deciding: the engine puts YES and NO on screen and calls `answer`, which
+  -- sets the carry the branch then tests. The program counter deliberately
+  -- stays put until it is answered, so `answer` is what moves it on.
   if op == "yesorno" then
-    self.carry = false
-    self.answered_no = (self.answered_no or 0) + 1
-    self:advance()
+    self.pending = { kind = "choice" }
+    self.status = "waiting"
+    self.awaiting_answer = true
     return
   end
 
@@ -412,10 +411,27 @@ function VM:step()
   self:advance()
 end
 
+--- Answer the question the script is waiting on.
+function VM:answer(yes)
+  self.carry = yes and true or false
+  self.awaiting_answer = false
+  self.answers = (self.answers or 0) + 1
+  self:advance()
+end
+
 --- Run until the script finishes or needs the engine.
 -- @return status: "ended", "waiting", "unsupported", or "lost"
 function VM:resume()
   if self.status == "waiting" then
+    -- Resumed without an answer. Declining is the documented default: it is
+    -- the answer that spends no money and takes no items, and it keeps a
+    -- caller that does not implement the prompt working rather than leaving
+    -- the carry flag holding whatever an earlier check happened to set.
+    if self.awaiting_answer then
+      self:answer(false)
+      self.unanswered = (self.unanswered or 0) + 1
+    end
+
     self.pending = nil
     self.status = "running"
     if self.finish_after_text then

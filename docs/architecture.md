@@ -894,11 +894,26 @@ only two left are the misparsed operands, 3084 and 3853.
 ### Answering the question
 
 `yesorno` became the most common ignored command the moment the standard scripts
-were reachable, because so many of them ask something. Leaving it alone was the
-worst option: the carry flag would hold whatever the previous check had set, so
-the branch would depend on unrelated history. The interpreter answers **no** and
-records that it did. Declining is the conservative answer — it is the one that
-does not spend money or take items.
+were reachable, because so many of them ask something. Ignoring it was the worst
+of the options: the carry flag would hold whatever the previous check had set,
+so the branch would follow unrelated history.
+
+Now the interpreter stops and waits. It yields a choice, the engine puts YES and
+NO above the text box — the words that asked the question stay on screen
+underneath, which is where the asking happened — and the answer sets the carry
+the branch then tests. The program counter deliberately does not move until the
+answer arrives, so answering is what advances it.
+
+This is worth having rather than defaulting, and there is a measurement that
+says so: running every script twice, saying yes throughout and then no
+throughout, **139 questions are asked and 82 scripts end differently** depending
+on the reply. A prompt that changed nothing would be decoration.
+
+A caller that resumes without answering still gets a defined result. Declining
+is the documented default — it is the answer that spends no money and takes no
+items — and there is a test that an unanswered question comes back false even
+when the carry was true beforehand, because that is exactly the stale-history
+bug the prompt exists to avoid.
 
 ## The text codes that were costing a third of the dialogue
 

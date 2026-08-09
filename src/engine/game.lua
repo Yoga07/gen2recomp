@@ -345,6 +345,33 @@ function game:show_script_demo()
   return false
 end
 
+--- Talk to the first NPC whose script asks a question, and stop on the prompt.
+function game:show_yesno_demo()
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, object in ipairs(map.objects or {}) do
+        if object.script and not object.trainer and not object.item then
+          self:enter(index, object.x, object.y + 1, "up")
+          self:interact()
+          -- Read through whatever they say until they ask something.
+          for _ = 1, 40 do
+            if self.ui and self.ui.kind == "choice" then
+              return true
+            end
+            if not self.dialogue and not self.script then
+              break
+            end
+            self:interact()
+          end
+          self.dialogue, self.script, self.ui = nil, nil, nil
+        end
+      end
+    end
+  end
+  return false
+end
+
 --- Stand in front of the first hidden item found and turn it up.
 -- @param again when true, try a second time and show the item pocket, which
 --        would show two of it if the flag were not stopping the repeat
@@ -582,7 +609,10 @@ function game:menu_key(key)
 
   if key == "x" or key == "escape" or key == "backspace" then
     -- Step back one screen rather than closing everything at once.
-    if self.ui.kind == "summary" then
+    if self.ui.kind == "choice" then
+      -- Backing out of a question is answering no, the way it is in the games.
+      self:answer_script(false)
+    elseif self.ui.kind == "summary" then
       self:open_party()
     elseif self.ui.kind == "pocket" then
       self:open_bag()
@@ -746,6 +776,11 @@ function game:menu_confirm()
     return
   end
 
+  if kind == "choice" then
+    self:answer_script(self.ui.list:selected() == "YES")
+    return
+  end
+
   if kind == "start" then
     local choice = self.ui.list:selected()
     if choice == "POKEMON" then
@@ -886,15 +921,20 @@ function game:draw_menu()
   local height = math.max(#rows, 1) * 12 + 12
   local x = wide and 0 or (game.SCREEN_WIDTH - width)
 
+  -- A yes-or-no box belongs just above the text that asked the question, not
+  -- in the corner where the start menu lives.
+  local top = kind == "choice"
+    and (game.SCREEN_HEIGHT - BOX_HEIGHT - height) or 0
+
   love.graphics.setColor(1, 1, 1)
-  love.graphics.rectangle("fill", x, 0, width, height)
+  love.graphics.rectangle("fill", x, top, width, height)
   love.graphics.setColor(0.1, 0.1, 0.1)
-  love.graphics.rectangle("line", x + 2.5, 2.5, width - 5, height - 5)
+  love.graphics.rectangle("line", x + 2.5, top + 2.5, width - 5, height - 5)
 
   if self.ui.list:is_empty() then
     local empty = (kind == "bag" or kind == "pocket" or kind == "sell")
       and "NO ITEMS" or "NO POKEMON"
-    font:draw_codes(self:encode(empty), x + (wide and 8 or 14), 10)
+    font:draw_codes(self:encode(empty), x + (wide and 8 or 14), top + 10)
   end
 
   -- The wide lists carry a name, a count and a price, which is 19 glyphs at
@@ -904,7 +944,7 @@ function game:draw_menu()
   local cursor_x = x + (wide and 1 or 6)
 
   for position, row in ipairs(rows) do
-    local y = 8 + (position - 1) * 12
+    local y = top + 8 + (position - 1) * 12
     font:draw_codes(self:encode(tostring(row.item)), text_x, y)
     if row.selected then
       love.graphics.setColor(0.1, 0.1, 0.1)
@@ -1087,6 +1127,13 @@ function game:advance_script()
       self.dialogue = { pages = pending.pages, page = 1 }
       return
     end
+
+    if pending and pending.kind == "choice" then
+      -- The script is waiting on an answer. Whatever it just said stays on
+      -- screen underneath, which is where the question was asked.
+      self.ui = { kind = "choice", list = menu.new(game.YES_NO, 2) }
+      return
+    end
     -- A prompt has nothing of its own to draw, so it just carries on.
   end
 
@@ -1165,6 +1212,21 @@ function game:facing_mart()
     end
   end
   return nil
+end
+
+game.YES_NO = { "YES", "NO" }
+
+--- Answer a script's question and let it carry on.
+function game:answer_script(yes)
+  local machine = self.script
+  self:close_menu()
+  -- The question has been answered, so the words that asked it come down.
+  self.dialogue = nil
+  if not machine then
+    return
+  end
+  machine:answer(yes)
+  self:advance_script()
 end
 
 game.MART_ENTRIES = { "BUY", "SELL", "QUIT" }
@@ -1430,10 +1492,17 @@ function game:interact()
   if self.dialogue then
     self.dialogue.page = self.dialogue.page + 1
     if self.dialogue.page > #self.dialogue.pages then
+      local finished = self.dialogue
       self.dialogue = nil
       -- A script waiting on that text box carries on now it is closed.
       if self.script then
         self:advance_script()
+        -- Unless what it wanted next was an answer, in which case the words
+        -- that asked the question stay up underneath it.
+        if self.ui and self.ui.kind == "choice" and not self.dialogue then
+          finished.page = #finished.pages
+          self.dialogue = finished
+        end
       end
     end
     return
