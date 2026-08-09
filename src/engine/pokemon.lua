@@ -119,6 +119,49 @@ function pokemon.new(species, base, options)
   end
 
   instance.hp = instance.stats.hp
+
+  -- Experience starts at whatever the level is worth, so a Pokemon met at
+  -- level 20 does not level up the moment it earns a single point.
+  local experience = require("src.engine.experience")
+  instance.exp = options.exp
+    or experience.total_for(base.growth_rate, level)
+
+  return instance
+end
+
+--- Recompute a Pokemon's stats after its level or species changed.
+--
+-- Current HP moves with the maximum rather than staying put: gaining a level
+-- should not leave a full-health Pokemon looking wounded.
+function pokemon.recompute(instance, base)
+  local before = instance.stats.hp
+  local missing = before and (before - instance.hp) or 0
+
+  local bases = {
+    hp = base.hp,
+    attack = base.attack,
+    defense = base.defense,
+    speed = base.speed,
+    special_attack = base.sp_attack,
+    special_defense = base.sp_defense,
+  }
+  for _, stat in ipairs(pokemon.STATS) do
+    instance.stats[stat] = pokemon.stat(bases[stat],
+      pokemon.dv_for(instance.dvs, stat), instance.level, stat,
+      instance.statexp[stat])
+  end
+
+  instance.hp = math.max(1, math.min(instance.stats.hp,
+    instance.stats.hp - missing))
+  instance.types = { base.type_1, base.type_2 }
+  return instance
+end
+
+--- Turn a Pokemon into what it evolves into.
+-- Everything personal survives: DVs, experience, stat experience, moves.
+function pokemon.evolve(instance, species, base)
+  instance.species = species
+  pokemon.recompute(instance, base)
   return instance
 end
 

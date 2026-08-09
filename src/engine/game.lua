@@ -17,6 +17,8 @@ local stages = require("src.engine.stages")
 local bag = require("src.engine.bag")
 local vm = require("src.engine.vm")
 local events_module = require("src.rom.events")
+local experience = require("src.engine.experience")
+local learnsets = require("src.rom.learnsets")
 
 local game = {}
 game.__index = game
@@ -559,6 +561,21 @@ function game:show_first_encounter(demo)
                 end
                 return true
               end
+              -- Knock the opponent over so the screenshot shows what happens
+              -- afterwards: the experience, and anything it buys.
+              if demo == "exp" and self.battle then
+                self.battle.opponent.hp = 1
+                -- A level 5 starter earns very little from a level 3 rodent,
+                -- so it is put one point short of levelling to show the whole
+                -- sequence rather than only the first line.
+                local leader = self.battle.player
+                local base = self.base_stats[leader.species]
+                leader.exp = experience.total_for(base.growth_rate,
+                  leader.level + 1) - 1
+                self:battle_fight()
+                return true
+              end
+
               -- Run one turn so the screenshot shows a battle in progress
               -- rather than only the opening line.
               if self.battle then
@@ -1845,6 +1862,80 @@ function game:party_leader()
   return self.party[1]
 end
 
+game.MAX_MOVES = 4
+
+--- Hand out experience for a defeated Pokémon.
+--
+-- Everything that follows from levelling happens here and in this order: the
+-- experience lands, the levels are crossed one at a time so no level's moves
+-- are skipped, stats are recomputed, and only then is evolution considered.
+-- @return lines describing what happened
+function game:award_experience(winner, fainted, from_trainer)
+  local lines = {}
+  if not winner or winner.hp <= 0 then
+    return lines
+  end
+
+  local fainted_base = self.base_stats and self.base_stats[fainted.species]
+  local winner_base = self.base_stats and self.base_stats[winner.species]
+  if not fainted_base or not winner_base then
+    return lines
+  end
+
+  local amount = experience.gain(fainted_base.base_exp, fainted.level,
+    { trainer = from_trainer })
+  local name = self.species_names[winner.species] or "?"
+  lines[#lines + 1] = ("%s got %d EXP!"):format(name, amount)
+
+  local _, gained = experience.award(winner, winner_base.growth_rate, amount)
+  if #gained == 0 then
+    return lines
+  end
+
+  pokemon.recompute(winner, winner_base)
+  lines[#lines + 1] = ("%s grew to level %d!"):format(name, winner.level)
+
+  -- Each level crossed teaches its own moves.
+  local record = self.learnset_records and self.learnset_records[winner.species]
+  for _, level in ipairs(gained) do
+    for _, move in ipairs(learnsets.moves_learned_at(record, level)) do
+      local known = false
+      for _, existing in ipairs(winner.moves) do
+        known = known or existing == move
+      end
+      if not known then
+        local move_name = (self.move_name_records or {})[move]
+          or ("MOVE " .. move)
+        if #winner.moves < game.MAX_MOVES then
+          winner.moves[#winner.moves + 1] = move
+          lines[#lines + 1] = ("%s learned %s!"):format(name, move_name)
+        else
+          -- Four is the limit; the oldest goes, which at least keeps the
+          -- newest move rather than refusing to learn anything ever again.
+          local forgotten = table.remove(winner.moves, 1)
+          winner.moves[#winner.moves + 1] = move
+          lines[#lines + 1] = ("%s forgot %s"):format(name,
+            (self.move_name_records or {})[forgotten] or "a move")
+          lines[#lines + 1] = ("and learned %s!"):format(move_name)
+        end
+      end
+    end
+  end
+
+  local evolution = learnsets.evolution_at(record, winner.level)
+  if evolution then
+    local into = self.base_stats[evolution.into]
+    if into then
+      local was = name
+      pokemon.evolve(winner, evolution.into, into)
+      lines[#lines + 1] = ("%s evolved into %s!"):format(was,
+        self.species_names[evolution.into] or "?")
+    end
+  end
+
+  return lines
+end
+
 --- Add a caught Pokémon to the party.
 -- @return true when it joined, false when the party is full
 function game:add_to_party(instance)
@@ -2036,6 +2127,17 @@ function game:battle_fight()
   self.battle_lines = self.battle:turn(player_move, opponent_move)
   if #self.battle_lines == 0 then
     self.battle_lines = { "Nothing happened." }
+  end
+
+  -- Experience is owed the moment the opponent goes down, and only once: the
+  -- flag is on the fainted Pokémon rather than on the battle, so a trainer's
+  -- second and third both pay out.
+  if opponent.hp <= 0 and not opponent.paid_out then
+    opponent.paid_out = true
+    for _, line in ipairs(self:award_experience(leader, opponent,
+      self.trainer ~= nil)) do
+      self.battle_lines[#self.battle_lines + 1] = line
+    end
   end
 end
 

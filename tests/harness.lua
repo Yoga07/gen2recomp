@@ -2165,6 +2165,151 @@ local function test_text_codes()
   end)())
 end
 
+-- Experience, levelling, and what follows from it.
+local function test_experience(rom, base_stats)
+  log("\n== experience ==")
+
+  local experience = require("src.engine.experience")
+  local pokemon = require("src.engine.pokemon")
+  local learnsets = require("src.rom.learnsets")
+
+  local located = rom and learnsets.locate(rom)
+  local learnset_records = located and located.records
+
+  -- The totals at level 100 are round, well-known numbers that come from
+  -- outside this code, which is what makes them worth asserting: a mistyped
+  -- coefficient shows up here rather than as a Pokémon that levels slightly
+  -- wrong for fifty hours.
+  check_equal("medium fast tops out at a million",
+    experience.total_for("medium_fast", 100), 1000000)
+  check_equal("fast at 800,000", experience.total_for("fast", 100), 800000)
+  check_equal("slow at 1,250,000", experience.total_for("slow", 100), 1250000)
+  check_equal("medium slow at 1,059,860",
+    experience.total_for("medium_slow", 100), 1059860)
+
+  -- Every curve starts at nothing, including the one whose polynomial goes
+  -- negative down there.
+  for _, name in ipairs(experience.CURVE_NAMES) do
+    check_equal(("%s starts at zero"):format(name),
+      experience.total_for(name, 1), 0)
+  end
+  check("the medium slow curve is not negative at low levels",
+    experience.total_for("medium_slow", 2) >= 0)
+
+  -- Curves have to be climbing, or level_for would go backwards.
+  local rising = 0
+  for _, name in ipairs(experience.CURVE_NAMES) do
+    local ok = true
+    for level = 2, 100 do
+      if experience.total_for(name, level)
+        < experience.total_for(name, level - 1) then
+        ok = false
+      end
+    end
+    if ok then rising = rising + 1 end
+  end
+  check_equal("every curve climbs", rising, #experience.CURVE_NAMES)
+
+  -- Reading a level back out of an amount has to agree with what put it in.
+  local agree = 0
+  for _, name in ipairs(experience.CURVE_NAMES) do
+    local ok = true
+    for level = 1, 100 do
+      if experience.level_for(name, experience.total_for(name, level)) ~= level then
+        ok = false
+      end
+    end
+    if ok then agree = agree + 1 end
+  end
+  check_equal("a level round-trips through its own total", agree,
+    #experience.CURVE_NAMES)
+  check_equal("one short of the next level is still the old level",
+    experience.level_for("medium_fast",
+      experience.total_for("medium_fast", 30) - 1), 29)
+
+  -- What a defeat is worth. A trainer's Pokémon pays half as much again, and
+  -- splitting it between participants divides it.
+  local plain = experience.gain(100, 20)
+  check_equal("a level 20 with 100 base exp is worth 285", plain, 285)
+  check_equal("a trainer's is worth half as much again",
+    experience.gain(100, 20, { trainer = true }), 427)
+  check_equal("two participants split it",
+    experience.gain(100, 20, { participants = 2 }), 142)
+  check("nothing is ever worth nothing", experience.gain(0, 1) >= 1)
+
+  if not base_stats then
+    log("  SKIP  the base stats were not located")
+    return
+  end
+
+  -- A new Pokémon starts with the experience its level is worth, or it would
+  -- level up on the first point it earned.
+  local cyndaquil = pokemon.new(155, base_stats[155], { level = 20 })
+  check_equal("a new Pokémon starts at its level's total", cyndaquil.exp,
+    experience.total_for(base_stats[155].growth_rate, 20))
+
+  -- Levelling recomputes the stats.
+  local before = cyndaquil.stats.attack
+  cyndaquil.hp = cyndaquil.stats.hp
+  experience.award(cyndaquil, base_stats[155].growth_rate,
+    experience.total_for(base_stats[155].growth_rate, 25) - cyndaquil.exp)
+  check_equal("it reaches the level the experience buys", cyndaquil.level, 25)
+  pokemon.recompute(cyndaquil, base_stats[155])
+  check("and its stats went up", cyndaquil.stats.attack > before)
+  check_equal("a healthy Pokémon stays healthy through a level up",
+    cyndaquil.hp, cyndaquil.stats.hp)
+
+  -- Damage carries across a level up rather than being healed away.
+  local hurt = pokemon.new(155, base_stats[155], { level = 20 })
+  hurt.hp = hurt.stats.hp - 7
+  hurt.level = 21
+  pokemon.recompute(hurt, base_stats[155])
+  check_equal("and a hurt one stays hurt by the same amount",
+    hurt.stats.hp - hurt.hp, 7)
+
+  -- Crossing several levels at once must not skip the moves in between.
+  if learnset_records then
+    local jumped = 0
+    for species = 1, 251 do
+      local record = learnset_records[species]
+      if record then
+        for _, entry in ipairs(record.moves) do
+          local at = learnsets.moves_learned_at(record, entry.level)
+          local present = false
+          for _, move in ipairs(at) do
+            present = present or move == entry.move
+          end
+          if present then jumped = jumped + 1 end
+        end
+      end
+    end
+    check("every learnset entry is returned at its own level", jumped > 2000,
+      ("%d"):format(jumped))
+
+    -- Evolution by level is read from the same records.
+    local evolving = 0
+    for species = 1, 251 do
+      if learnsets.evolution_at(learnset_records[species], 100) then
+        evolving = evolving + 1
+      end
+    end
+    log("        %d species evolve by level somewhere below 100", evolving)
+    check("plenty of species evolve by level", evolving > 50,
+      ("%d"):format(evolving))
+
+    -- Evolving keeps what is personal and changes what is not.
+    local bulbasaur = pokemon.new(1, base_stats[1], { level = 16 })
+    local dvs_before, exp_before = bulbasaur.dvs, bulbasaur.exp
+    pokemon.evolve(bulbasaur, 2, base_stats[2])
+    check_equal("evolving changes the species", bulbasaur.species, 2)
+    check_equal("keeps the DVs", bulbasaur.dvs, dvs_before)
+    check_equal("keeps the experience", bulbasaur.exp, exp_before)
+    check_equal("keeps the level", bulbasaur.level, 16)
+    check("and takes the new species' typing",
+      bulbasaur.types[1] == base_stats[2].type_1)
+  end
+end
+
 -- Reading a real cartridge save.
 local function test_sav(base_stats)
   log("\n== save files ==")
@@ -3567,6 +3712,7 @@ function harness.run(rom_path, report_path)
     test_item_balls(rom, map_result,
       found and found.item_names and found.item_names.records)
     test_text_codes()
+    test_experience(rom, found and found.base_stats and found.base_stats.records)
     test_sav(found and found.base_stats and found.base_stats.records)
     test_music(rom)
     test_movement(rom, map_result)

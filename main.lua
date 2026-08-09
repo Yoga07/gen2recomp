@@ -148,6 +148,7 @@ function love.load(args)
         sign = (args[i + 2] == "sign" or args[i + 2] == "npc"
           or args[i + 2] == "grass" or args[i + 2] == "catch"
           or args[i + 2] == "catchsave" or args[i + 2] == "party"
+          or args[i + 2] == "exp"
           or args[i + 2] == "menu" or args[i + 2] == "connection"
           or args[i + 2] == "trainer" or args[i + 2] == "bag"
           or args[i + 2] == "pocket" or args[i + 2] == "balls"
@@ -209,7 +210,7 @@ function love.load(args)
     elseif state.shot and state.shot.sign == "menu" then
       state.game:open_menu()
     elseif state.shot and (state.shot.sign == "grass" or state.shot.sign == "catch"
-      or state.shot.sign == "catchsave") then
+      or state.shot.sign == "catchsave" or state.shot.sign == "exp") then
       state.game:show_first_encounter(state.shot.sign)
     elseif state.shot and state.shot.sign then
       state.game:show_first_sign(state.shot.sign)

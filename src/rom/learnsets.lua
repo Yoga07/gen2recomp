@@ -160,6 +160,35 @@ end
 --
 -- The game teaches moves in order and pushes the oldest out once four are
 -- known, so the last four learned at or below the level is the right answer.
+--- The moves learned on reaching exactly this level.
+--
+-- Distinct from moves_at, which is everything known by then. Levelling several
+-- times at once has to hand out each level's moves separately or the ones in
+-- between are silently skipped.
+function learnsets.moves_learned_at(record, level)
+  local learned = {}
+  for _, entry in ipairs(record and record.moves or {}) do
+    if entry.level == level then
+      learned[#learned + 1] = entry.move
+    end
+  end
+  return learned
+end
+
+--- The evolution triggered by reaching a level, if there is one.
+function learnsets.evolution_at(record, level)
+  for _, entry in ipairs(record and record.evolutions or {}) do
+    -- Stat-based evolutions also happen at a level; which branch is taken
+    -- depends on a comparison the engine does not model yet, so the first is
+    -- taken and the fact is recorded rather than hidden.
+    if (entry.method == "level" or entry.method == "stat")
+      and entry.level and level >= entry.level then
+      return entry
+    end
+  end
+  return nil
+end
+
 function learnsets.moves_at(record, level)
   local known = {}
   for _, entry in ipairs(record.moves) do
