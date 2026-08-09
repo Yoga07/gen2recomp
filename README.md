@@ -48,7 +48,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Item balls on the ground | working — 178 pickups |
 | Hidden items | working — 85, keyed by event flag |
 | Mart inventories | working — 34 shops, 27 shopkeepers |
-| **Engine:** shop counters, buying and selling | working |
+| **Engine:** shop counters, buying and selling | working — by quantity |
 | **Engine:** start menu, party list, summary | working |
 | Audio | not started |
 | Reading real .sav files | not started |
@@ -65,12 +65,14 @@ them is a real outcome. Item balls lying on the ground are picked up by facing
 them and pressing Z, and stay picked up; so are the 85 items buried in the
 ground, if you press Z on the right square. Talking to a shopkeeper opens their
 counter, stocked with what that particular shop sells; they will buy things back
-at half price, but not your key items. X opens the menu — party list, summaries,
+at half price, but not your key items. Pick an item and a dial asks how many —
+up and down step by one, left and right by ten, and it will not let you dial
+past what you can pay for or what the bag will hold. X opens the menu — party list, summaries,
 and the bag, whose four pockets are filled from what the cartridge says each
 item is. F5 saves, and the bag and your money go with it; a save is loaded
 automatically.
 
-354 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+367 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

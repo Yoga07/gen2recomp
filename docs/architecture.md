@@ -821,11 +821,29 @@ which are keyed by position. Here the flags are distinct across all but one
 pair, and that pair is the same item reachable from two squares, so sharing a
 key is the behaviour you want.
 
+### Buying and selling several
+
+Picking something at a counter opens a dial rather than transacting. Up and down
+step by one and wrap; left and right jump by ten and stop at the ends.
+
+The dial cannot be wound past what is actually possible: its ceiling is the
+smaller of what the money buys and what the bag has room for, so a shop with
+¥3000 and Great Balls at ¥600 stops at five. That ceiling is
+`bag.affordable(price, money, room)`, kept out of the engine and away from LÖVE
+so the arithmetic is checked on its own — a free item is bounded by room alone,
+which is the case a plain division gets wrong.
+
+Buying still checks that everything fits before charging, and puts back whatever
+did fit if it does not. Without that, a purchase of five into a stack with room
+for three would take the money for five and hand over three. The bag's `add`
+returns how many it actually took, which is what makes the check possible, and
+`remove` is all-or-nothing so selling four when three are held cannot half
+happen.
+
 ### What is not there yet
 
 The scripts that hand out items and set your money are not interpreted, so the
 starting bag and the starting ¥3000 are stand-ins written in the engine rather
-than something the cartridge granted. Buying and selling move one item at a time
-rather than by quantity. The Itemfinder does not exist, so a hidden item is
-found by pressing the button on the right square rather than by being told which
-square to try.
+than something the cartridge granted. The Itemfinder does not exist, so a hidden
+item is found by pressing the button on the right square rather than by being
+told which square to try.

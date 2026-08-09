@@ -283,6 +283,17 @@ function game:show_mart_demo(mode)
           elseif mode == "sell" then
             self:open_mart_sell(object.mart)
             self:menu_confirm()
+          elseif mode == "quantity" then
+            -- Open the dial and wind it up, without going through with it.
+            self:open_mart_buy(object.mart)
+            self:menu_confirm()
+            self:quantity_move(10, false)
+            self:quantity_move(2, false)
+          elseif mode == "bulk" then
+            self:open_mart_buy(object.mart)
+            self:menu_confirm()
+            self:quantity_move(4, false)
+            self:menu_confirm()
           end
           return true
         end
@@ -496,6 +507,27 @@ function game:menu_key(key)
     return false
   end
 
+  -- The quantity dial takes the arrows before any list does, and it is the one
+  -- screen where left and right mean something.
+  if self.ui.kind == "quantity" then
+    if key == "up" or key == "w" then
+      self:quantity_move(1, true)
+      return true
+    end
+    if key == "down" or key == "s" then
+      self:quantity_move(-1, true)
+      return true
+    end
+    if key == "right" or key == "d" then
+      self:quantity_move(10, false)
+      return true
+    end
+    if key == "left" or key == "a" then
+      self:quantity_move(-10, false)
+      return true
+    end
+  end
+
   if key == "up" or key == "w" then
     self.ui.list:move(-1)
     return true
@@ -512,6 +544,13 @@ function game:menu_key(key)
       self:open_party()
     elseif self.ui.kind == "pocket" then
       self:open_bag()
+    elseif self.ui.kind == "quantity" then
+      -- Back to the list it was asked from, not out of the shop.
+      if self.ui.mode == "buy" then
+        self:open_mart_buy(self.ui.mart)
+      else
+        self:open_mart_sell(self.ui.mart)
+      end
     elseif self.ui.kind == "mart" or self.ui.kind == "sell" then
       -- Back to the counter, not out of the shop entirely.
       self:open_mart(self.ui.mart)
@@ -647,7 +686,7 @@ function game:menu_confirm()
   if kind == "mart" then
     local entry = self.ui.stock[self.ui.list.cursor]
     if entry then
-      self:buy_item(entry)
+      self:open_quantity("buy", entry)
     end
     return
   end
@@ -655,8 +694,13 @@ function game:menu_confirm()
   if kind == "sell" then
     local entry = self.ui.contents[self.ui.list.cursor]
     if entry then
-      self:sell_item(entry)
+      self:open_quantity("sell", entry)
     end
+    return
+  end
+
+  if kind == "quantity" then
+    self:quantity_confirm()
     return
   end
 
@@ -750,6 +794,40 @@ function game:draw_menu()
       y = y + 10
     end
 
+    love.graphics.setColor(1, 1, 1)
+    return
+  end
+
+  -- The quantity dial has no list behind it, just a number being turned.
+  if kind == "quantity" then
+    local ui = self.ui
+    -- The sell list already carries the halved price, so one field serves
+    -- both directions.
+    local total = ui.entry.price * ui.amount
+
+    local box_width, box_height = 104, 34
+    local x = game.SCREEN_WIDTH - box_width
+    local y = 84
+
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", x, y, box_width, box_height)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", x + 2.5, y + 2.5,
+      box_width - 5, box_height - 5)
+
+    font:draw_codes(self:encode(self:truncate(ui.entry.name, 12)), x + 8, y + 6)
+    font:draw_codes(self:encode(("x%02d   ¥%d"):format(ui.amount, total)),
+      x + 8, y + 18)
+
+    -- The money box below still applies, so fall through to it.
+    love.graphics.setColor(1, 1, 1)
+    local label = ("MONEY ¥%d"):format(self.money)
+    local money_height = 22
+    local money_y = game.SCREEN_HEIGHT - money_height
+    love.graphics.rectangle("fill", 0, money_y, 104, money_height)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", 2.5, money_y + 2.5, 99, money_height - 5)
+    font:draw_codes(self:encode(label), 8, money_y + 7)
     love.graphics.setColor(1, 1, 1)
     return
   end
@@ -973,14 +1051,15 @@ function game:open_mart_sell(index)
   return true
 end
 
---- Sell one of whatever the cursor is on.
-function game:sell_item(entry)
-  if not self.bag:remove(entry.item, 1) then
+--- Sell some number of whatever the cursor is on.
+function game:sell_item(entry, amount)
+  amount = amount or 1
+  if not self.bag:remove(entry.item, amount) then
     return false
   end
 
-  self.money = self.money + entry.price
-  self:notify(("Sold %s. ¥%d now."):format(entry.name, self.money))
+  self.money = self.money + entry.price * amount
+  self:notify(("Sold %d %s. ¥%d now."):format(amount, entry.name, self.money))
 
   -- The list has changed underneath the cursor. An emptied bag goes back to the
   -- counter rather than showing nothing.
@@ -992,22 +1071,82 @@ function game:sell_item(entry)
   return true
 end
 
---- Buy one of whatever the cursor is on.
-function game:buy_item(entry)
-  if self.money < entry.price then
+--- Buy some number of whatever the cursor is on.
+function game:buy_item(entry, amount)
+  amount = amount or 1
+  local cost = entry.price * amount
+
+  if self.money < cost then
     self:say({ "You don't have", "enough money." })
     return false
   end
 
-  local taken = self.bag:add(entry.item, 1)
-  if taken < 1 then
-    self:say({ ("You can't carry any"), ("more %s."):format(entry.name) })
+  local taken = self.bag:add(entry.item, amount)
+  if taken < amount then
+    -- Put back whatever did fit rather than charging for a partial sale.
+    if taken > 0 then
+      self.bag:remove(entry.item, taken)
+    end
+    self:say({ "You can't carry any", ("more %s."):format(entry.name) })
     return false
   end
 
-  self.money = self.money - entry.price
-  self:notify(("Bought %s. ¥%d left."):format(entry.name, self.money))
+  self.money = self.money - cost
+  self:notify(("Bought %d %s. ¥%d left."):format(amount, entry.name,
+    self.money))
   return true
+end
+
+-- How many of something the player could take on, given the price, what is
+-- already held, and what a stack will hold.
+function game:affordable(entry)
+  return bag.affordable(entry.price, self.money, self.bag:room_for(entry.item))
+end
+
+--- Ask how many, before buying or selling.
+function game:open_quantity(mode, entry)
+  local most = mode == "buy" and self:affordable(entry)
+    or math.min(bag.MAX_STACK, self.bag:count(entry.item))
+
+  if most < 1 then
+    if mode == "buy" and self.bag:count(entry.item) >= bag.MAX_STACK then
+      self:say({ "You can't carry any", ("more %s."):format(entry.name) })
+    else
+      self:say({ "You don't have", "enough money." })
+    end
+    return false
+  end
+
+  self.ui = { kind = "quantity", mode = mode, entry = entry, amount = 1,
+              most = most, mart = self.ui.mart }
+  return true
+end
+
+--- Move the quantity dial. Up and down step by one and wrap, the way the games
+-- do; left and right jump by ten and stop at the ends.
+function game:quantity_move(delta, wrap)
+  local ui = self.ui
+  if wrap then
+    ui.amount = (ui.amount - 1 + delta) % ui.most + 1
+  else
+    ui.amount = math.max(1, math.min(ui.most, ui.amount + delta))
+  end
+end
+
+--- Go through with whatever the quantity prompt was asking about.
+function game:quantity_confirm()
+  local ui = self.ui
+  local mode, entry, amount = ui.mode, ui.entry, ui.amount
+  local mart = ui.mart
+
+  if mode == "buy" then
+    if self:buy_item(entry, amount) then
+      self:open_mart_buy(mart)
+    end
+    return
+  end
+
+  self:sell_item(entry, amount)
 end
 
 --- Pick up an item ball.

@@ -148,6 +148,24 @@ function Bag:sellable()
   return out
 end
 
+--- How many more of an item this bag could hold.
+function Bag:room_for(item)
+  return bag.MAX_STACK - self:count(item)
+end
+
+--- How many of something could be bought, given the price, the money to hand,
+-- and the room left in the bag.
+--
+-- Kept apart from the bag so the arithmetic can be checked on its own. A free
+-- item is limited only by room, which is why the price is not simply divided
+-- into the money in every case.
+function bag.affordable(price, money, room)
+  if price <= 0 then
+    return room
+  end
+  return math.min(room, math.floor(money / price))
+end
+
 --- The first ball in the bag, which is what a battle reaches for.
 function Bag:first_ball()
   local balls = self:pocket("balls")

@@ -146,7 +146,8 @@ function love.load(args)
           or args[i + 2] == "item" or args[i + 2] == "itemgone"
           or args[i + 2] == "mart" or args[i + 2] == "buy"
           or args[i + 2] == "sell" or args[i + 2] == "hidden"
-          or args[i + 2] == "hiddengone")
+          or args[i + 2] == "hiddengone" or args[i + 2] == "quantity"
+          or args[i + 2] == "bulk")
           and args[i + 2] or nil,
         frames = 2,
       }
@@ -168,7 +169,8 @@ function love.load(args)
       or state.shot.sign == "hiddengone") then
       state.game:show_hidden_demo(state.shot.sign == "hiddengone")
     elseif state.shot and (state.shot.sign == "mart"
-      or state.shot.sign == "buy" or state.shot.sign == "sell") then
+      or state.shot.sign == "buy" or state.shot.sign == "sell"
+      or state.shot.sign == "quantity" or state.shot.sign == "bulk") then
       state.game:show_mart_demo(state.shot.sign ~= "mart" and state.shot.sign
         or nil)
     elseif state.shot and (state.shot.sign == "item"

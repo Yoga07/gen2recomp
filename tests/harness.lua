@@ -1792,6 +1792,41 @@ local function test_items(attributes, names)
   end
   check_equal("no item is sellable for nothing", worthless, 0)
 
+  -- Buying and selling by quantity. How many you can take on is the smaller of
+  -- what the money buys and what the bag will hold.
+  check_equal("¥3000 buys five GREAT BALLs at 600",
+    bag.affordable(600, 3000, 99), 5)
+  check_equal("and four when only four will fit",
+    bag.affordable(600, 3000, 4), 4)
+  check_equal("one short of the price buys none",
+    bag.affordable(600, 599, 99), 0)
+  check_equal("a free item is limited only by room",
+    bag.affordable(0, 0, 7), 7)
+  check_equal("an empty stack has room for a full one",
+    bag.new(attributes, names):room_for(18), bag.MAX_STACK)
+
+  -- A stack near the cap limits the purchase rather than silently truncating
+  -- it, which is what the buy path relies on to avoid charging for items it
+  -- cannot hand over.
+  local nearly_full = bag.new(attributes, names)
+  nearly_full:add(18, 96)
+  check_equal("a nearly full stack has room for three",
+    nearly_full:room_for(18), 3)
+  check_equal("and money does not create room",
+    bag.affordable(300, 999999, nearly_full:room_for(18)), 3)
+  check_equal("adding more than fits reports what fit",
+    nearly_full:add(18, 10), 3)
+  check_equal("and the stack is at the cap", nearly_full:count(18),
+    bag.MAX_STACK)
+
+  -- Selling several at once takes them all or none.
+  local stack = bag.new(attributes, names)
+  stack:add(18, 4)
+  check("selling more than is held fails", not stack:remove(18, 5))
+  check_equal("and leaves the stack alone", stack:count(18), 4)
+  check("selling exactly what is held works", stack:remove(18, 4))
+  check_equal("and empties it", stack:count(18), 0)
+
   -- Round trip through the save.
   local restored = bag.from_list(attributes, names, held:to_list())
   check_equal("the bag survives a save", restored:count(18), 99)
