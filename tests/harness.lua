@@ -2165,6 +2165,110 @@ local function test_text_codes()
   end)())
 end
 
+-- Fainting: sending out the next, and running out of them.
+local function test_fainting(base_stats)
+  log("\n== fainting ==")
+  if not base_stats then
+    log("  SKIP  the base stats were not located")
+    return
+  end
+
+  local game = require("src.engine.game")
+  local pokemon = require("src.engine.pokemon")
+  local battle = require("src.engine.battle")
+
+  -- The game's methods are tested against a stand-in rather than a running
+  -- game: everything here is about party bookkeeping, and building a real one
+  -- would drag in a window and a cartridge cache to prove nothing extra.
+  local function fake(party, money)
+    local instance = setmetatable({
+      party = party,
+      money = money or 3000,
+      species_names = {},
+      base_stats = base_stats,
+      entered = nil,
+      said = nil,
+    }, game)
+    instance.enter = function(self, index) self.entered = index or true end
+    instance.say = function(self, lines) self.said = lines end
+    instance.default_map = function() return 7 end
+    return instance
+  end
+
+  local function mon(species, level, hp)
+    local instance = pokemon.new(species, base_stats[species], { level = level })
+    instance.hp = hp == nil and instance.stats.hp or hp
+    return instance
+  end
+
+  -- Finding a replacement.
+  local down, up = mon(155, 10, 0), mon(25, 12)
+  local instance = fake({ down, up })
+  check_equal("the next healthy member is the one still standing",
+    instance:next_healthy_member(down), up)
+  check("a fainted one is never chosen",
+    instance:next_healthy_member(up) == nil)
+
+  -- Sending it out clears the finished flag, or the battle would be dismissed
+  -- the moment the replacement arrived.
+  instance.battle = { player = down, opponent = mon(19, 8), over = true,
+                      winner = "opponent" }
+  check("a replacement is sent out", instance:send_next_party_member())
+  check_equal("and it is the healthy one", instance.battle.player, up)
+  check("the battle is no longer finished", instance.battle.over == false)
+  check("nor does it have a winner", instance.battle.winner == nil)
+
+  -- With nothing left there is no replacement.
+  local all_down = fake({ mon(155, 10, 0), mon(25, 12, 0) })
+  all_down.battle = { player = all_down.party[1], over = true }
+  check("with nothing standing there is no replacement",
+    all_down:send_next_party_member() == false)
+
+  -- Blacking out heals, charges half the money, and moves the player.
+  local beaten = fake({ mon(155, 10, 0), mon(25, 12, 0) }, 3000)
+  beaten.battle = { player = beaten.party[1], over = true }
+  beaten:blackout()
+  check_equal("blacking out costs half the money", beaten.money, 1500)
+  check_equal("the party is healed", beaten.party[1].hp,
+    beaten.party[1].stats.hp)
+  check_equal("all of it", beaten.party[2].hp, beaten.party[2].stats.hp)
+  check("the battle is gone", beaten.battle == nil)
+  check("and the player has been moved", beaten.entered ~= nil)
+  check("with something said about it", beaten.said ~= nil)
+
+  -- Odd amounts round in the player's favour by a coin at most.
+  local odd = fake({ mon(155, 10, 0) }, 999)
+  odd.battle = { player = odd.party[1] }
+  odd:blackout()
+  check_equal("half of an odd amount rounds down", odd.money, 500)
+
+  -- Status is cleared along with the damage.
+  local poisoned = fake({ mon(155, 10, 0) })
+  poisoned.party[1].status = "poison"
+  poisoned.battle = { player = poisoned.party[1] }
+  poisoned:blackout()
+  check("blacking out clears status too", poisoned.party[1].status == nil)
+
+  -- The bug this found: a knockout sets `over`, so a trainer whose first
+  -- Pokémon fell had the battle dismissed before the second was sent out.
+  -- Sending the next one has to clear the flag.
+  local against = fake({ mon(155, 20) })
+  against.trainer = {
+    name = "FALKNER", sent = 1, flag = 1,
+    party = { mon(16, 7, 0), mon(17, 9) },
+  }
+  against.battle = battle.new(against.party[1], against.trainer.party[1],
+    {}, {}, {})
+  against.battle.over = true
+  against.battle.winner = "player"
+  against.beaten = {}
+  check("the trainer sends out another", against:send_next_trainer_pokemon())
+  check_equal("and it is their second", against.battle.opponent,
+    against.trainer.party[2])
+  check("the battle is not over after a knockout mid-team",
+    against.battle.over == false)
+end
+
 -- Experience, levelling, and what follows from it.
 local function test_experience(rom, base_stats)
   log("\n== experience ==")
@@ -3713,6 +3817,7 @@ function harness.run(rom_path, report_path)
       found and found.item_names and found.item_names.records)
     test_text_codes()
     test_experience(rom, found and found.base_stats and found.base_stats.records)
+    test_fainting(found and found.base_stats and found.base_stats.records)
     test_sav(found and found.base_stats and found.base_stats.records)
     test_music(rom)
     test_movement(rom, map_result)

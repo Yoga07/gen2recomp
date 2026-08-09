@@ -97,6 +97,10 @@ function game.new(game_id, start_index)
   instance.bag:add(9, 1)   -- ANTIDOTE
   instance.bag:add(7, 1)   -- BICYCLE
 
+  -- Where a blackout puts you back. The games use the last Pokémon Centre
+  -- visited; nothing notices that yet, so it is where the game began.
+  instance.respawn = nil
+
   -- A save takes precedence over the default starting map.
   local restored = instance:restore()
   if not restored then
@@ -561,6 +565,36 @@ function game:show_first_encounter(demo)
                 end
                 return true
               end
+              -- Knock the player over instead, to show what happens when
+              -- there is nothing left to send out.
+              if demo == "blackout" and self.battle then
+                for _, member in ipairs(self.party or {}) do
+                  member.hp = 0
+                end
+                self.battle.player.hp = 0
+                self.battle.over = true
+                self.battle.winner = "opponent"
+                self.battle_state = "message"
+                self:battle_advance()
+                return true
+              end
+
+              -- The same, but with a second Pokémon still standing, which
+              -- should be sent out rather than ending anything.
+              if demo == "switch" and self.battle then
+                local base = self.base_stats[25]
+                if base then
+                  self.party[#self.party + 1] =
+                    pokemon.new(25, base, { level = 12 })
+                end
+                self.battle.player.hp = 0
+                self.battle.over = true
+                self.battle.winner = "opponent"
+                self.battle_state = "message"
+                self:battle_advance()
+                return true
+              end
+
               -- Knock the opponent over so the screenshot shows what happens
               -- afterwards: the experience, and anything it buys.
               if demo == "exp" and self.battle then
@@ -2141,6 +2175,68 @@ function game:battle_fight()
   end
 end
 
+--- The next party member still standing, if there is one.
+function game:next_healthy_member(besides)
+  for _, member in ipairs(self.party or {}) do
+    if member ~= besides and member.hp > 0 then
+      return member
+    end
+  end
+  return nil
+end
+
+--- Send out the next Pokémon after one faints.
+-- @return true when another went out
+function game:send_next_party_member()
+  local replacement = self:next_healthy_member(self.battle.player)
+  if not replacement then
+    return false
+  end
+
+  self.battle.player = replacement
+  replacement.stages = stages.new()
+  -- The battle was marked finished when the last one fell; it is not.
+  self.battle.over = false
+  self.battle.winner = nil
+  self.battle_lines = {
+    "Go!",
+    ("%s!"):format(self.species_names[replacement.species] or "?"),
+  }
+  return true
+end
+
+--- Everything fainted.
+--
+-- The party is healed, half the money is gone, and the player wakes up where
+-- they last set out from. The games send you to the Pokémon Centre you last
+-- visited; nothing yet notices you visiting one, so this uses the map the game
+-- started on and says so rather than pretending otherwise.
+function game:blackout()
+  for _, member in ipairs(self.party or {}) do
+    member.hp = member.stats.hp
+    member.status = nil
+  end
+
+  local lost = math.floor(self.money / 2)
+  self.money = self.money - lost
+
+  self:end_battle()
+  self:enter(self.respawn or self:default_map())
+  self:say({
+    "You have no usable",
+    "POKéMON left!",
+    ("You lost ¥%d."):format(lost),
+  })
+end
+
+--- Clear away a finished battle.
+function game:end_battle()
+  self.battle = nil
+  self.battle_lines = nil
+  self.battle_state = nil
+  self.trainer = nil
+end
+
 --- Send out the trainer's next Pokémon, if they have one left.
 -- @return true when another was sent, false when the trainer is beaten
 function game:send_next_trainer_pokemon()
@@ -2164,6 +2260,10 @@ function game:send_next_trainer_pokemon()
   self.trainer.sent = next_index
   self.battle.opponent = next_mon
   next_mon.stages = stages.new()
+  -- The knockout marked the battle finished. Another Pokémon on the field
+  -- means it is not.
+  self.battle.over = false
+  self.battle.winner = nil
   self.battle_lines = {
     ("%s sent out"):format(self.trainer.name),
     ("%s!"):format(self.species_names[next_mon.species] or "?"),
@@ -2178,22 +2278,35 @@ function game:battle_advance()
     return
   end
 
-  if self.battle.over then
-    self.battle = nil
-    self.battle_lines = nil
-    self.battle_state = nil
-    self.trainer = nil
-    return
-  end
-
   if self.battle_state == "message" then
-    -- A trainer sends out the next Pokémon rather than losing outright.
+    -- Whoever fell has to be replaced before the battle can be called over.
+    -- Checking `over` first is what made a trainer battle end when their first
+    -- Pokémon fainted: the flag is set by the knockout, not by the defeat.
     if self.trainer and self.battle.opponent.hp <= 0 then
       if self:send_next_trainer_pokemon() then
         return
       end
     end
+
+    if self.battle.player.hp <= 0 then
+      if self:send_next_party_member() then
+        return
+      end
+      self:blackout()
+      return
+    end
+
+    if self.battle.over then
+      self:end_battle()
+      return
+    end
+
     self.battle_state = "menu"
+    return
+  end
+
+  if self.battle.over then
+    self:end_battle()
     return
   end
 
