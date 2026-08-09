@@ -920,20 +920,66 @@ off, and there is a test that the mismatches stay uniform.
 Channel counts come out at one song with two channels, 24 with three and 34 with
 four, and every song's channel pointers climb in order.
 
-### Nothing plays
+### The channel bytecode: a negative result
 
-This is the table, read and cached. It is not sound.
+Channel data is contiguous — channel 1 runs up to where channel 2 begins — so
+the boundaries are known for 148 channels across the 59 songs. That is exactly
+the lever that validated the script opcode widths: a walk has to land on the
+boundary, never over and never short, and 148 of them have to agree at once.
 
-Playing it needs two things that do not exist here. The channel streams are a
-bytecode of their own — notes, octaves, tempo, envelopes, loops, calls — which
-would have to be worked out the way the movement language was, and that one had
-five commands against this one's several dozen. And the output of that bytecode
-is register writes to a Game Boy sound chip: four channels of square, wave and
-noise generation that would have to be synthesised sample by sample.
+**It does not work here, and the reason is worth writing down.**
 
-Extracting the table without claiming to play it is the honest half. `playsound`,
-`cry` and `playmusic` remain among the commands the interpreter steps over, and
-the test output still names them.
+With every command one byte wide, a walk consumes one byte at a time and lands
+on the boundary every single time. A table of all zeros scores 148 out of 148.
+The measure cannot tell a correct width table from a table that says nothing,
+which is the same vacuousness that got the script widths wrong on the first
+attempt — there it was marking every opcode as terminating, so a walk could
+never overrun; here it is allowing width zero, so a walk can never drift.
+
+Adding a second constraint did not rescue it. `$FF` is what 89 of the 148
+channels end on, so under a correct parse it should only be met at the end, and
+every earlier one is a byte that should have been swallowed as somebody's
+operand. Scoring that too, and hill-climbing from four random starts:
+
+| run | score | widths |
+|---|---|---|
+| from zero | 1391 | — |
+| restart 1 | 1402 | different |
+| restart 2 | 1401 | different |
+| restart 3 | 1402 | different |
+| restart 4 | 1401 | different |
+
+Four searches, four near-identical scores, four different answers. **Nothing
+agreed with anything.** The problem is underdetermined by the evidence
+available, and a hill-climbed table that scored 1402 would have looked
+authoritative and been invented.
+
+The restart-agreement check is the only reason this was caught rather than
+shipped, and it is worth reaching for whenever a search is doing the deciding.
+The degeneracy is now asserted in the test suite — a table of zeros satisfying
+the extents completely is a *passing* test — so the measure cannot be adopted
+again by someone who has not read this.
+
+### What does stand
+
+- 148 channel extents, 28033 bytes, **72% of them below `$D0`**, consistent with
+  notes being pitch and length packed into one byte.
+- 44 distinct command bytes, heavily concentrated: `$DC`, `$D5`, `$D4` and `$D6`
+  are half of all commands between them.
+- A channel opens with one of **only six** bytes — `$DA`, `$DB`, `$EF`, `$E1`,
+  `$D8`, `$D9` — which is what setting up an instrument before playing looks
+  like.
+- 89 of 148 channels end on `$FF`.
+
+Getting further needs a different kind of evidence than byte layout: an emulator
+to watch the sound registers, or the note pitches recovered by ear against a
+recording. Neither is bytecode archaeology, which is what this project is set up
+to do.
+
+And beyond the language there is still the chip — four channels of square, wave
+and noise, synthesised sample by sample. `playsound`, `cry` and `playmusic`
+remain among the commands the interpreter steps over, and the test output still
+names them.
 
 ### Movement
 

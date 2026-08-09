@@ -2235,6 +2235,72 @@ local function test_music(rom)
   end
   check_equal("every song's channels are stored in order", ordered,
     result.count)
+
+  -- The channel command language is not decoded, and this records why rather
+  -- than leaving the question open for someone to answer the same wrong way.
+  --
+  -- Channel data is contiguous: channel 1 runs up to where channel 2 starts.
+  -- That is the lever that validated the script opcode widths, so it is the
+  -- obvious one to reach for here. It is useless. A walk with every command
+  -- one byte wide consumes a byte at a time and lands on the boundary every
+  -- time, so a table of zeros scores perfectly and the measure distinguishes
+  -- nothing. Asserting the degeneracy keeps it from being adopted again.
+  local extents = {}
+  for _, song in ipairs(result.songs) do
+    for index = 1, song.count - 1 do
+      local from = song.bank * 0x4000 + (song.channels[index] - 0x4000)
+      local to = song.bank * 0x4000 + (song.channels[index + 1] - 0x4000)
+      if to > from and to - from < 4096 then
+        extents[#extents + 1] = { from = from, to = to }
+      end
+    end
+  end
+
+  local function lands_exactly(widths)
+    local exact = 0
+    for _, extent in ipairs(extents) do
+      local at = extent.from
+      local ok = true
+      while at < extent.to do
+        local value = rom:u8(at)
+        local width = value < 0xD0 and 0 or widths[value]
+        if width == nil then
+          ok = false
+          break
+        end
+        at = at + 1 + width
+      end
+      if ok and at == extent.to then
+        exact = exact + 1
+      end
+    end
+    return exact
+  end
+
+  local zeros = {}
+  for value = 0xD0, 0xFF do
+    zeros[value] = 0
+  end
+
+  log("        %d channel extents; a width table of all zeros lands exactly " ..
+    "%d times", #extents, lands_exactly(zeros))
+  check("there are channel extents to measure against", #extents > 100,
+    ("%d"):format(#extents))
+  check_equal("a table of zeros satisfies the extents completely",
+    lands_exactly(zeros), #extents)
+
+  -- The facts that do stand, and are worth keeping true.
+  local starts, ends = {}, {}
+  for _, extent in ipairs(extents) do
+    starts[rom:u8(extent.from)] = (starts[rom:u8(extent.from)] or 0) + 1
+    ends[rom:u8(extent.to - 1)] = (ends[rom:u8(extent.to - 1)] or 0) + 1
+  end
+  local distinct_starts = 0
+  for _ in pairs(starts) do distinct_starts = distinct_starts + 1 end
+  check("a channel opens with one of only a few commands", distinct_starts <= 10,
+    ("%d distinct"):format(distinct_starts))
+  check("and most channels end on $FF", (ends[0xFF] or 0) >= #extents * 0.5,
+    ("%d of %d"):format(ends[0xFF] or 0, #extents))
 end
 
 -- Movement blocks: the little language applymovement points at.
