@@ -2269,6 +2269,84 @@ local function test_fainting(base_stats)
     against.battle.over == false)
 end
 
+-- The machine list, and the field moves it names.
+local function test_machines(rom, move_names, base_stats)
+  log("\n== machines ==")
+  if not move_names then
+    log("  SKIP  the move names were not located")
+    return
+  end
+
+  local machines = require("src.rom.machines")
+
+  local result, why = machines.locate(rom, move_names)
+  if not check("the machine list was located", result ~= nil, why) then
+    return
+  end
+
+  log("        57 machines at 0x%06X", result.offset)
+  check_equal("fifty TMs and seven HMs", #result.moves, machines.COUNT)
+
+  -- The HMs are what the check rests on, and they are worth restating: these
+  -- names come from the cartridge's move table, not from here.
+  local expected = { CUT = "CUT", FLY = "FLY", SURF = "SURF",
+                     STRENGTH = "STRENGTH", FLASH = "FLASH",
+                     WHIRLPOOL = "WHIRLPOOL", WATERFALL = "WATERFALL" }
+  for name, wanted in pairs(expected) do
+    check_equal(("HM %s teaches %s"):format(name, wanted),
+      move_names[result.hm[name]], wanted)
+  end
+
+  -- Every machine teaches a different move, which is the shape half of the
+  -- test. On its own it is satisfied by 626 offsets in this cartridge.
+  local seen, distinct = {}, 0
+  for _, move in ipairs(result.moves) do
+    if not seen[move] then
+      seen[move] = true
+      distinct = distinct + 1
+    end
+  end
+  check_equal("no move is on two machines", distinct, machines.COUNT)
+
+  -- Spot checks on the TM half, from outside this code.
+  check_equal("TM01 is DYNAMICPUNCH", move_names[result.moves[1]],
+    "DYNAMICPUNCH")
+  check_equal("TM26 is EARTHQUAKE", move_names[result.moves[26]], "EARTHQUAKE")
+  check_equal("TM44 is REST", move_names[result.moves[44]], "REST")
+
+  if not base_stats then
+    return
+  end
+
+  -- The field moves in the engine's hands.
+  local game = require("src.engine.game")
+  local pokemon = require("src.engine.pokemon")
+
+  local instance = setmetatable({
+    hm_moves = result.hm,
+    badges = {},
+    party = { pokemon.new(155, base_stats[155], { level = 20 }) },
+    species_names = setmetatable({}, { __index = function() return "MON" end }),
+  }, game)
+  instance.party[1].moves = { 33 }
+
+  check("nobody can surf to begin with",
+    instance:knows_field_move("SURF") == nil)
+  instance.party[1].moves[#instance.party[1].moves + 1] = result.hm.SURF
+  check("teaching it changes that",
+    instance:knows_field_move("SURF") == instance.party[1])
+
+  -- The badge half is written but not enforced, and the test says which is
+  -- which rather than letting the distinction blur.
+  local member, licensed = instance:can_use_field_move("SURF",
+    game.SURF_BADGE)
+  check("the move is known", member ~= nil)
+  check("but the badge is not held", licensed == false)
+  instance:award_badge(game.SURF_BADGE)
+  local _, now = instance:can_use_field_move("SURF", game.SURF_BADGE)
+  check("awarding it says so", now == true)
+end
+
 -- Switching, and reaching into the bag mid-fight.
 local function test_battle_menu(base_stats, item_attributes, item_names)
   log("\n== battle menu ==")
@@ -3985,6 +4063,9 @@ function harness.run(rom_path, report_path)
     test_text_codes()
     test_experience(rom, found and found.base_stats and found.base_stats.records)
     test_fainting(found and found.base_stats and found.base_stats.records)
+    test_machines(rom,
+      found and found.move_names and found.move_names.records,
+      found and found.base_stats and found.base_stats.records)
     test_battle_menu(found and found.base_stats and found.base_stats.records,
       found and found.item_attributes and found.item_attributes.records,
       found and found.item_names and found.item_names.records)

@@ -72,6 +72,10 @@ function game.new(game_id, start_index)
   instance.item_names = cache.read(game_id, "item_names")
   instance.marts = cache.read(game_id, "marts") or {}
   instance.script_code = cache.read(game_id, "script_code")
+  -- Which move each HM teaches, read from the cartridge at import.
+  instance.hm_moves = cache.read(game_id, "hm_moves") or {}
+  instance.badges = {}
+  instance.surfing = false
   instance.std_scripts = cache.read(game_id, "std_scripts")
   -- Two separate spaces, because the cartridge treats them as two.
   instance.script_flags = { event = {}, flag = {} }
@@ -404,6 +408,40 @@ function game:show_face_demo(from)
             return true
           end
           self.dialogue, self.script, self.ui = nil, nil, nil
+        end
+      end
+    end
+  end
+  return false
+end
+
+--- Stand at the water's edge and get on it.
+-- @param taught whether the party is given Surf first
+function game:show_surf_demo(taught)
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for cell_y = 1, map.height * world.CELLS_PER_BLOCK - 2 do
+        for cell_x = 1, map.width * world.CELLS_PER_BLOCK - 2 do
+          -- Somewhere to stand with water directly in front.
+          if self.world:walkable(map, cell_x, cell_y)
+            and self.world:is_water(map, cell_x, cell_y + 1) then
+            self:enter(index, cell_x, cell_y, "down")
+
+            local leader = self:party_leader()
+            if leader and taught and self.hm_moves.SURF then
+              leader.moves[#leader.moves + 1] = self.hm_moves.SURF
+            end
+
+            self:interact()
+            if taught then
+              -- Ride out onto it, so the screenshot shows the player on the
+              -- water rather than only the message about getting on.
+              self.dialogue = nil
+              self.player.cell_y = cell_y + 1
+            end
+            return true
+          end
         end
       end
     end
@@ -1513,6 +1551,87 @@ function game:facing_script()
   return nil
 end
 
+--------------------------------------------------------------------------------
+-- Field moves.
+--
+-- Which move each HM teaches is read from the cartridge rather than written
+-- here, so nothing below names a move id.
+--------------------------------------------------------------------------------
+
+game.BADGE_COUNT = 16
+
+function game:has_badge(index)
+  return self.badges[index] == true
+end
+
+function game:award_badge(index)
+  self.badges[index] = true
+end
+
+--- The party member that knows a field move, if any does.
+function game:knows_field_move(which)
+  local move = self.hm_moves and self.hm_moves[which]
+  if not move then
+    return nil
+  end
+  for _, member in ipairs(self.party or {}) do
+    for _, known in ipairs(member.moves or {}) do
+      if known == move then
+        return member
+      end
+    end
+  end
+  return nil
+end
+
+--- May a field move be used?
+--
+-- Two conditions in the games: someone knows it, and the badge that licenses it
+-- has been earned. Only the first is enforced. Nothing awards badges yet, and
+-- that is not an oversight to be papered over -- earning one happens inside a
+-- `special` call the interpreter cannot run, and gym leaders cannot be picked
+-- out of the trainer tables either: the classes holding exactly one trainer are
+-- the Kanto leaders and the Elite Four, while all eight Johto leaders have
+-- rematch parties and so hold several. Gating on a badge that can never be
+-- earned would make Surf permanently useless, which is worse than an ungated
+-- Surf, so the check is written and reported rather than enforced.
+-- @return the member that can do it, whether the badge is held
+function game:can_use_field_move(which, badge)
+  local member = self:knows_field_move(which)
+  return member, badge == nil or self:has_badge(badge)
+end
+
+game.SURF_BADGE = 4 -- Fog Badge, in the games
+
+--- Get on the water, or off it.
+function game:toggle_surf()
+  local delta = FACING_DELTA[self.player.facing]
+  local x = self.player.cell_x + delta[1]
+  local y = self.player.cell_y + delta[2]
+
+  if self.surfing then
+    -- Riding onto land is how you get off, so nothing to do here beyond
+    -- noticing that the player has arrived somewhere solid.
+    return false
+  end
+
+  if not self.world:is_water(self.map, x, y) then
+    return false
+  end
+
+  local member = self:knows_field_move("SURF")
+  if not member then
+    self:say({ "The water is deep.", "Something might be", "able to swim." })
+    return true
+  end
+
+  self.surfing = true
+  self:say({
+    ("%s used SURF!"):format(self.species_names[member.species] or "?"),
+  })
+  return true
+end
+
 --- The hidden item the player is facing, if it is still there.
 --
 -- These are background events, so they are found the same way a signpost is
@@ -1876,6 +1995,11 @@ function game:interact()
     return
   end
 
+  -- Facing water with something that can swim is an offer to get on it.
+  if self:toggle_surf() then
+    return
+  end
+
   -- A shopkeeper opens their counter rather than just saying their line.
   local mart = self:facing_mart()
   if mart and self:open_mart(mart) then
@@ -1919,10 +2043,15 @@ function game:update(dt)
 
   local event, cell_x, cell_y = self.player:update(dt, self:held_direction(),
     function(x, y)
-      return self.world:can_enter(self.map, x, y)
+      return self.world:can_enter(self.map, x, y, self.surfing)
     end)
 
   if event == "arrived" then
+    -- Riding onto solid ground is how surfing ends.
+    if self.surfing and not self.world:is_water(self.map, cell_x, cell_y) then
+      self.surfing = false
+    end
+
     -- Stepping off an edge into a connected map comes first, because the cell
     -- the player is now standing on does not exist on this map.
     local connection = self.world:connection_beyond(self.map, cell_x, cell_y)

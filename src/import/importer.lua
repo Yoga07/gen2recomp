@@ -23,6 +23,7 @@ local marts = require("src.rom.marts")
 local script_decode = require("src.rom.script_decode")
 local std_scripts = require("src.rom.std_scripts")
 local music = require("src.rom.music")
+local machines = require("src.rom.machines")
 local learnsets = require("src.rom.learnsets")
 local cache = require("src.import.cache")
 
@@ -303,6 +304,23 @@ function importer.run(path, progress)
       offsets.marts = mart_result.offset
       mart_summary.count = mart_result.count
       cache.write(descriptor.game, "marts", mart_result.lists)
+    end
+  end
+
+  -- Which move each TM and HM teaches. Needs the move names, because the
+  -- names are what confirm the list is the list.
+  local machine_summary = { count = 0 }
+  if found.move_names then
+    step("locating the machine list")
+    local machine_result, machine_err = machines.locate(rom,
+      found.move_names.records)
+    if not machine_result then
+      failed.machines = machine_err
+    else
+      offsets.machines = machine_result.offset
+      machine_summary.count = machines.COUNT
+      cache.write(descriptor.game, "machines", machine_result.moves)
+      cache.write(descriptor.game, "hm_moves", machine_result.hm)
     end
   end
 
@@ -659,6 +677,7 @@ function importer.run(path, progress)
     battle_data = battle_summary,
     marts = mart_summary,
     music = music_summary,
+    machines = machine_summary,
     script_code = script_summary,
     sha1 = sha1,
   }
@@ -731,6 +750,11 @@ function importer.format_report(report)
       report.script_code.failed)
     lines[#lines + 1] = ("  %-16s %4d standard scripts")
       :format("std scripts", report.script_code.std)
+  end
+
+  if report.machines and report.machines.count > 0 then
+    lines[#lines + 1] = ("  %-16s %4d TMs and HMs")
+      :format("machines", report.machines.count)
   end
 
   if report.music and report.music.count > 0 then

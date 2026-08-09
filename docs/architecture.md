@@ -891,6 +891,50 @@ Wiring them in took the interpreter from 1396 text boxes across a full run to
 **2833**, and `jumpstd` no longer appears among the reasons scripts stop — the
 only two left are the misparsed operands, 3084 and 3853.
 
+## The machine list, and why badges are not earnable yet
+
+The items are named TM01 to TM50 and HM01 to HM07, which says nothing about
+what is on them. Somewhere there is a list of 57 move ids in that order.
+
+A run of 57 distinct valid move ids is not convincing on its own — **626
+offsets in Crystal satisfy that**. What settles it is the tail: the last seven
+have to decode, through the move-name table this project validates separately,
+to the seven field moves in HM order. **Exactly one of the 626 does**, and the
+rest of that list then reads as the real thing: TM01 DynamicPunch, TM06 Toxic,
+TM26 Earthquake, TM44 Rest.
+
+So nothing in the engine names a move id. Surf is whatever HM03 says it is.
+
+### Badges are written but not enforced
+
+A field move needs two things in the games: someone who knows it, and the badge
+that licenses it. Only the first is enforced here, and the reason is worth
+stating rather than leaving as a silent gap.
+
+Nothing awards badges. Earning one happens inside a `special` call the
+interpreter cannot run, and gym leaders cannot be picked out of the trainer
+tables either. That last part was measured rather than assumed: the trainer
+classes holding **exactly one** trainer are Will, Bruno, Karen, Koga, Lance,
+Brock, Misty, Lt. Surge, Erika, Janine, Sabrina, Blaine, Red, Blue and Eusine —
+the Kanto leaders and the Elite Four. **All eight Johto leaders are missing**,
+because in Crystal they carry rematch parties and so hold several entries each.
+"One trainer in the class" picks out the wrong half of the gyms.
+
+Gating Surf on a badge that can never be earned would make it permanently
+useless, which is worse than an ungated Surf. So `can_use_field_move` returns
+both facts — who can do it, and whether the badge is held — and the caller
+currently acts on the first. The tests assert both halves separately so the
+distinction cannot blur.
+
+### Surf
+
+Water was already a distinct collision kind, so riding on it is a matter of
+letting `can_enter` accept water while surfing and land while not. Getting on is
+facing water and pressing the button; getting off is riding onto solid ground,
+which is noticed when the step completes rather than being a separate action.
+
+Facing deep water with nothing that can swim says so.
+
 ## Reading a real cartridge save
 
 A Game Boy save is 32 KiB of battery-backed RAM, and where things sit inside it

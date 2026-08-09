@@ -204,6 +204,12 @@ function world:walkable(map, cell_x, cell_y)
   return collision.walkable(value)
 end
 
+--- Is this cell water? Surfable, and blocking on foot.
+function world:is_water(map, cell_x, cell_y)
+  local value = self:collision_at(map, cell_x, cell_y)
+  return value ~= nil and collision.is_water(value)
+end
+
 --- Which edge, if any, a cell lies beyond.
 function world:edge_beyond(map, cell_x, cell_y)
   local width = map.width * world.CELLS_PER_BLOCK
@@ -254,7 +260,9 @@ end
 -- Not the same as walkable. A door is a wall tile with a warp on it — 544 of
 -- Crystal's 1300 warps sit on $07 — and the player enters it, triggering the
 -- warp, rather than standing on it. So a warp overrides terrain.
-function world:can_enter(map, cell_x, cell_y)
+-- @param surfing when true, water is what carries the player and land is
+--        reached by riding onto it
+function world:can_enter(map, cell_x, cell_y, surfing)
   if self:warp_at(map, cell_x, cell_y) then
     return true
   end
@@ -262,6 +270,10 @@ function world:can_enter(map, cell_x, cell_y)
   -- Walking off an edge is allowed where a connection continues the world;
   -- the transfer happens once the step completes.
   if self:connection_beyond(map, cell_x, cell_y) then
+    return true
+  end
+
+  if surfing and self:is_water(map, cell_x, cell_y) then
     return true
   end
 
