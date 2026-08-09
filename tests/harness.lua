@@ -2165,6 +2165,130 @@ local function test_text_codes()
   end)())
 end
 
+-- Movement blocks: the little language applymovement points at.
+local function test_movement(rom, map_result)
+  log("\n== movement ==")
+
+  local movement = require("src.rom.movement")
+
+  -- Read from bytes built here, so the expected reading is stated rather than
+  -- discovered. $0C is a step down, $0F a step right, $01 a turn to face up.
+  local function block(...)
+    local bytes = {}
+    for _, value in ipairs({ ... }) do
+      bytes[#bytes + 1] = string.char(value)
+    end
+    local fake = { size = #bytes, data = table.concat(bytes) }
+    function fake:u8(offset)
+      return string.byte(self.data, offset + 1)
+    end
+    return fake
+  end
+
+  local down_twice = movement.decode(block(0x0C, 0x0C, 0x47), 0)
+  check_equal("two steps down move two tiles down", down_twice and down_twice.dy, 2)
+  check_equal("and none sideways", down_twice and down_twice.dx, 0)
+  check_equal("and leave the walker facing down",
+    down_twice and down_twice.facing, "down")
+  check_equal("and the block is three bytes", down_twice and down_twice.bytes, 3)
+
+  local around = movement.decode(block(0x0C, 0x0D, 0x0E, 0x0F, 0x47), 0)
+  check_equal("down, up, left, right cancels out on y",
+    around and around.dy, 0)
+  check_equal("and on x", around and around.dx, 0)
+  check_equal("ending facing the way it last stepped",
+    around and around.facing, "right")
+
+  -- The first group of four turns without moving, which is the distinction
+  -- that matters: a script that turns someone must not also shift them.
+  local turn = movement.decode(block(0x01, 0x47), 0)
+  check_equal("a turn changes the facing", turn and turn.facing, "up")
+  check_equal("without moving", turn and (turn.dx + turn.dy), 0)
+
+  -- Every group above the turns steps.
+  for _, base in ipairs({ 0x04, 0x08, 0x0C, 0x10 }) do
+    local stepped = movement.decode(block(base, 0x47), 0)
+    check_equal(("$%02X steps"):format(base), stepped and stepped.dy, 1)
+  end
+
+  if not map_result then
+    log("  SKIP  maps were not located")
+    return
+  end
+
+  -- The real blocks. This is where the direction mapping is checked against
+  -- the cartridge rather than against itself: if up and down were the wrong
+  -- way round, objects would walk off their maps far more often.
+  local script_decode = require("src.rom.script_decode")
+  local std_scripts = require("src.rom.std_scripts")
+
+  local entries = {}
+  for _, header in ipairs(map_result.headers) do
+    local decoded = not header.unparsed and events.decode(rom, header)
+    if decoded then
+      local bank = math.floor(header.attributes.scripts / 0x4000)
+      for _, object in ipairs(decoded.objects) do
+        if object.script and object.kind ~= events.OBJECT_TRAINER
+          and object.kind ~= events.OBJECT_ITEM then
+          entries[#entries + 1] = { bank = bank, addr = object.script }
+        end
+      end
+      for _, bg in ipairs(decoded.bg_events) do
+        if bg.script and bg.kind ~= events.BGEVENT_ITEM then
+          entries[#entries + 1] = { bank = bank, addr = bg.script }
+        end
+      end
+      for _, coord in ipairs(decoded.coord_events) do
+        if coord.script then
+          entries[#entries + 1] = { bank = bank, addr = coord.script }
+        end
+      end
+    end
+  end
+
+  local std_result = std_scripts.locate(rom)
+  if std_result then
+    for _, entry in ipairs(std_result.entries) do
+      entries[#entries + 1] = { bank = entry.bank, addr = entry.addr }
+    end
+  end
+
+  local code = script_decode.reachable(rom, entries)
+
+  local blocks, decoded_ok, with_unknown, longest = 0, 0, 0, 0
+  local steps_total = 0
+  for _, bank_code in pairs(code) do
+    for _, instruction in pairs(bank_code) do
+      if instruction.opcode == 0x69 or instruction.opcode == 0x6A then
+        blocks = blocks + 1
+        if instruction.movement then
+          decoded_ok = decoded_ok + 1
+          steps_total = steps_total + #instruction.movement.steps
+          longest = math.max(longest, #instruction.movement.steps)
+          if instruction.movement.unknown then
+            with_unknown = with_unknown + 1
+          end
+        end
+      end
+    end
+  end
+
+  log("        %d movement commands, %d blocks decoded, %d steps, longest %d",
+    blocks, decoded_ok, steps_total, longest)
+  check("the movement blocks decode", decoded_ok >= blocks * 0.95,
+    ("%d of %d"):format(decoded_ok, blocks))
+  check("and most end cleanly rather than on something unrecognised",
+    with_unknown <= blocks * 0.2,
+    ("%d of %d stopped early"):format(with_unknown, blocks))
+  -- The longest walk in the game is 56 steps, which is a cutscene rather than
+  -- someone stepping aside. What matters is that it fits inside the decoder's
+  -- own limit, or the block would come back unfinished and look like a walk
+  -- that simply stopped.
+  check("the longest walk fits within the decoder's limit",
+    longest < movement.MAX_STEPS, ("%d of %d"):format(longest,
+      movement.MAX_STEPS))
+end
+
 -- The script interpreter, run over every script in the game.
 local function test_script_vm(rom, map_result)
   log("\n== script interpreter ==")
@@ -3132,6 +3256,7 @@ function harness.run(rom_path, report_path)
     test_item_balls(rom, map_result,
       found and found.item_names and found.item_names.records)
     test_text_codes()
+    test_movement(rom, map_result)
     test_script_vm(rom, map_result)
     test_hidden_items(rom, map_result,
       found and found.item_names and found.item_names.records)

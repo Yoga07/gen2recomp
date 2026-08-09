@@ -36,6 +36,7 @@ local HEADLESS = {
   ["--probe-textfar"] = "tests.probe_textfar",
   ["--probe-stdscripts"] = "tests.probe_stdscripts",
   ["--probe-specials"] = "tests.probe_specials",
+  ["--probe-movement"] = "tests.probe_movement",
   ["--dump-tilesets"] = "tests.dump_tilesets",
   ["--dump-maps"] = "tests.dump_maps",
 }
@@ -152,7 +153,8 @@ function love.load(args)
           or args[i + 2] == "sell" or args[i + 2] == "hidden"
           or args[i + 2] == "hiddengone" or args[i + 2] == "quantity"
           or args[i + 2] == "bulk" or args[i + 2] == "script"
-          or args[i + 2] == "yesno")
+          or args[i + 2] == "yesno" or args[i + 2] == "faceleft"
+          or args[i + 2] == "faceright")
           and args[i + 2] or nil,
         frames = 2,
       }
@@ -170,7 +172,11 @@ function love.load(args)
     if not start_game(game_id, state.shot and state.shot.map_index) then
       return
     end
-    if state.shot and state.shot.sign == "yesno" then
+    if state.shot and (state.shot.sign == "faceleft"
+      or state.shot.sign == "faceright") then
+      state.game:show_face_demo(state.shot.sign == "faceleft" and "left"
+        or "right")
+    elseif state.shot and state.shot.sign == "yesno" then
       state.game:show_yesno_demo()
     elseif state.shot and state.shot.sign == "script" then
       state.game:show_script_demo()

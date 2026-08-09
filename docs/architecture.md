@@ -891,6 +891,58 @@ Wiring them in took the interpreter from 1396 text boxes across a full run to
 **2833**, and `jumpstd` no longer appears among the reasons scripts stop — the
 only two left are the misparsed operands, 3084 and 3853.
 
+### Movement
+
+`applymovement` names an object and points at a little language of its own: one
+byte per step. The terminator is `$47`, and that was measured rather than
+assumed — it ends **all 307** blocks the scripts point at, within 56 bytes, while
+`$FF`, which is the terminator every other structure in this cartridge uses and
+therefore the obvious guess, **never appears at all**. What sits after the `$47`
+is usually a text block, which is the other half of the confirmation.
+
+The commands come in groups of four, with the direction in the low two bits in
+the same down-up-left-right order the object events use:
+
+| bytes | meaning |
+|---|---|
+| `$00`–`$03` | turn on the spot |
+| `$04`–`$07` | turn and step |
+| `$08`–`$0B` | step slowly |
+| `$0C`–`$0F` | step |
+| `$10`–`$13` | step quickly |
+
+Only two things matter to the engine: which way the object ends up facing, and
+where it ends up standing. All 353 movement commands in the game decode, over
+1523 steps, the longest walk being 56 — a cutscene rather than someone stepping
+aside.
+
+Movements are applied at once rather than animated. There is no walking
+animation for anyone but the player, and a script that waited on an animation
+which never finished would hang.
+
+### Objects have a present tense now
+
+The map record is what the cartridge says. What the scripts have done since is
+kept separately, keyed by map and object index, and that is what the drawing
+reads: which way each object faces, how far it has walked from where it started,
+and whether it is still there at all. That state is what let `faceplayer` stop
+being a no-op, and `disappear` and `appear` do what they say.
+
+Checking a facing by looking at an 8-pixel sprite in a screenshot is not
+checking anything, so the demo says the answer out loud instead. Approaching the
+same NPC from either side:
+
+```
+PLAYER STANDS LEFT      PLAYER STANDS RIGHT
+NPC FACES LEFT          NPC FACES RIGHT
+```
+
+The two differ, and each is the direction the player is actually standing in.
+The first NPC tried never turned at all, which was not a bug: a shopkeeper
+behind a counter has no reason to call `faceplayer`, and a script that never
+turns anyone proves nothing either way. The demo now keeps looking until it
+finds one that does.
+
 ### The special commands, and what is honestly knowable
 
 `special` calls a routine written in assembly. There are **127 distinct ones** in

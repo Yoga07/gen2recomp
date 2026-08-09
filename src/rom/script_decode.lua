@@ -16,8 +16,12 @@
 
 local script_ops = require("src.rom.script_ops")
 local text = require("src.rom.text")
+local movement = require("src.rom.movement")
 
 local script_decode = {}
+
+script_decode.APPLYMOVEMENT = 0x69
+script_decode.APPLYMOVEMENT_LAST = 0x6A
 
 -- Where a branch target sits within each command's operands, and whether the
 -- target carries its own bank byte first.
@@ -149,6 +153,21 @@ function script_decode.reachable(rom, entries)
             instruction.text = block.pages
             instruction.prompted = block.prompted
           end
+        end
+      end
+
+      -- Movement blocks are resolved here for the same reason text is: the
+      -- engine reads the cache and cannot go back to the cartridge.
+      local move_addr
+      if opcode == script_decode.APPLYMOVEMENT then
+        move_addr = rom:u16le(at + 2)
+      elseif opcode == script_decode.APPLYMOVEMENT_LAST then
+        move_addr = rom:u16le(at + 1)
+      end
+      if move_addr and move_addr >= 0x4000 and move_addr <= 0x7FFF then
+        local flat = bank * 0x4000 + (move_addr - 0x4000)
+        if flat < rom.size then
+          instruction.movement = movement.decode(rom, flat)
         end
       end
 

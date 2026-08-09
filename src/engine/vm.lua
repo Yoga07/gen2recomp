@@ -29,6 +29,9 @@ local vm = {}
 
 vm.MAX_STEPS = 2000
 
+-- The same down-up-left-right order the movement blocks and object events use.
+vm.FACINGS = { [0] = "down", "up", "left", "right" }
+
 local VM = {}
 VM.__index = VM
 
@@ -414,6 +417,35 @@ function VM:step()
 
   if op == "faceplayer" then
     if host and host.face_player then host:face_player() end
+    self:advance()
+    return
+  end
+
+  -- Movement. Applied at once rather than animated, so a script never waits on
+  -- a walk the engine cannot draw.
+  if op == "applymovement" or op == "applymovementlasttalked" then
+    if host and host.script_move then
+      local id = op == "applymovement" and (instruction.args[1] or 0) or 0
+      host:script_move(id, instruction.movement)
+    end
+    self:advance()
+    return
+  end
+
+  if op == "turnobject" then
+    -- Object first, then the way to face, in the same order the steps use.
+    local facing = vm.FACINGS[(instruction.args[2] or 0) % 4]
+    if host and host.script_turn then
+      host:script_turn(instruction.args[1] or 0, facing)
+    end
+    self:advance()
+    return
+  end
+
+  if op == "disappear" or op == "appear" then
+    if host and host.script_show then
+      host:script_show(instruction.args[1] or 0, op == "appear")
+    end
     self:advance()
     return
   end

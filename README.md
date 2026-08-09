@@ -42,6 +42,8 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Map scripts | interpreted — 1669 of 1771 run to an end |
 | Standard scripts | working — 52, reached by jumpstd |
 | **Engine:** yes-or-no prompts | working — 139 questions |
+| Movement blocks | working — 353 walks decoded |
+| **Engine:** NPCs turn, walk and vanish | working |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | **Engine:** script interpreter | working — 14558 instructions decoded |
 | **Engine:** status conditions and stat stages | working |
@@ -74,7 +76,7 @@ and the bag, whose four pockets are filled from what the cartridge says each
 item is. F5 saves, and the bag and your money go with it; a save is loaded
 automatically.
 
-402 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+418 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

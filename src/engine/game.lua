@@ -83,6 +83,9 @@ function game.new(game_id, start_index)
   instance.taken = {}
   -- Hidden items already turned up, keyed by their own event flag.
   instance.found = {}
+  -- What the scripts have done to the map's objects: which way they face,
+  -- where they have walked to, whether they are still there.
+  instance.objects = {}
 
   -- A stand-in for what the game's own scripts would hand out. Mum's potion,
   -- the balls from the mart and a key item are enough to exercise every pocket;
@@ -338,6 +341,49 @@ function game:show_script_demo()
             self.dialogue = nil
             self.script = nil
           end
+        end
+      end
+    end
+  end
+  return false
+end
+
+--- Approach an NPC from the side and talk to them.
+--
+-- Which way they turn is what says the facings are the right way round: coming
+-- at someone from their left should leave them looking left, not right.
+-- @param from "left", "right", "up" or "down", where the player stands
+function game:show_face_demo(from)
+  from = from or "left"
+  local place = {
+    left = { -1, 0, "right" },
+    right = { 1, 0, "left" },
+    down = { 0, 1, "up" },
+    up = { 0, -1, "down" },
+  }
+  local spot = place[from]
+
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      for _, object in ipairs(map.objects or {}) do
+        if object.script and not object.trainer and not object.item then
+          self:enter(index, object.x + spot[1], object.y + spot[2], spot[3])
+          self:interact()
+          local state = self.talking_to and self:object_state(self.talking_to)
+          -- Keep looking until one of them actually turns. Plenty of scripts
+          -- never call faceplayer -- a shopkeeper behind a counter has no
+          -- reason to -- and one of those proves nothing either way.
+          if self.dialogue and state and state.facing ~= "down" then
+            -- Say the outcome rather than leaving it to be squinted at: a
+            -- sprite at this size does not read reliably in a screenshot.
+            self:say({
+              ("PLAYER STANDS %s"):format(from:upper()),
+              ("NPC FACES %s"):format((state.facing or "?"):upper()),
+            })
+            return true
+          end
+          self.dialogue, self.script, self.ui = nil, nil, nil
         end
       end
     end
@@ -1035,6 +1081,35 @@ end
 -- Everything it can change goes through one of these.
 --------------------------------------------------------------------------------
 
+--- Runtime state for one of the map's objects.
+--
+-- The map record is what the cartridge says; this is what has happened since.
+-- Keyed by map and object index, so it survives walking away and coming back,
+-- and it is what the drawing reads rather than the static record.
+function game:object_state(index)
+  local key = ("%d:%d"):format(self.map_index, index)
+  local state = self.objects[key]
+  if not state then
+    state = { facing = "down", dx = 0, dy = 0 }
+    self.objects[key] = state
+  end
+  return state
+end
+
+--- The object a script means by its id.
+--
+-- Scripts name objects by a number of their own. Zero is the player, and
+-- everything else is an index into the map's object list -- the ids that turn
+-- up run from 0 to 12 against maps with as many objects, which is what says
+-- they are indices rather than sprite ids or anything else.
+function game:script_object(id)
+  if id == 0 then
+    return nil, "player"
+  end
+  local objects = self.map.objects or {}
+  return objects[id], id
+end
+
 function game:script_flag(space, index)
   local store = self.script_flags[space]
   return store and store[index] == true
@@ -1069,11 +1144,67 @@ function game:script_add_money(amount)
   self.money = math.max(0, self.money + amount)
 end
 
+-- The way to look to face someone standing in a given direction from you.
+local OPPOSITE = { up = "down", down = "up", left = "right", right = "left" }
+
 --- Turn whoever is being spoken to towards the player.
--- The overworld draws NPCs facing down and does not carry a per-object facing
--- yet, so this is honest about doing nothing rather than pretending.
 function game:face_player()
-  return false
+  local index = self.talking_to
+  if not index then
+    return false
+  end
+  self:object_state(index).facing = OPPOSITE[self.player.facing]
+  return true
+end
+
+--- Turn an object to face a direction.
+function game:script_turn(id, facing)
+  local object, index = self:script_object(id)
+  if not object or index == "player" then
+    return false
+  end
+  self:object_state(index).facing = facing
+  return true
+end
+
+--- Walk an object through a movement block.
+--
+-- Applied in one go rather than animated: the engine has no walking animation
+-- for anyone but the player, and a script that waits for an animation that
+-- never finishes would hang. The object ends up where the block leaves it and
+-- facing the way it leaves it, which is what the rest of the script assumes.
+function game:script_move(id, block)
+  if not block then
+    return false
+  end
+
+  local object, index = self:script_object(id)
+  if index == "player" then
+    -- Moving the player about mid-script is not wired up; the world scrolls
+    -- around them and the walk would have to be animated to look like anything.
+    return false
+  end
+  if not object then
+    return false
+  end
+
+  local state = self:object_state(index)
+  state.dx = state.dx + (block.dx or 0)
+  state.dy = state.dy + (block.dy or 0)
+  if block.facing then
+    state.facing = block.facing
+  end
+  return true
+end
+
+--- Take an object off the map, or put it back.
+function game:script_show(id, visible)
+  local object, index = self:script_object(id)
+  if not object or index == "player" then
+    return false
+  end
+  self:object_state(index).hidden = not visible or nil
+  return true
 end
 
 --- Run the script at an address, and keep running it until it wants something.
@@ -1147,17 +1278,29 @@ function game:facing_script()
   local x = self.player.cell_x + delta[1]
   local y = self.player.cell_y + delta[2]
 
+  self.talking_to = nil
+
   for _, bg in ipairs(self.map.bg_events or {}) do
     if bg.x == x and bg.y == y and bg.script
       and bg.kind ~= events_module.BGEVENT_ITEM then
       return bg.script
     end
   end
-  for _, object in ipairs(self.map.objects or {}) do
-    if object.x == x and object.y == y and object.script
-      and not object.trainer and not object.item then
+  for index, object in ipairs(self.map.objects or {}) do
+    local state = self.objects[("%d:%d"):format(self.map_index, index)]
+    if state and state.hidden then
+      goto continue
+    end
+    -- Objects are talked to where they are standing now, which a script may
+    -- have changed.
+    if object.x + (state and state.dx or 0) == x
+      and object.y + (state and state.dy or 0) == y
+      and object.script and not object.trainer and not object.item then
+      -- Remembered so faceplayer knows who is being spoken to.
+      self.talking_to = index
       return object.script
     end
+    ::continue::
   end
   return nil
 end
@@ -2092,14 +2235,23 @@ function game:draw(scale)
   -- shifted up by half a tile the way the original did.
   love.graphics.setColor(1, 1, 1)
   for index, object in ipairs(map.objects or {}) do
-    local ox = object.x * world.CELL_PIXELS - camera_x
-    local oy = object.y * world.CELL_PIXELS - camera_y - 4
+    -- Where the object is now, which is where the cartridge put it plus
+    -- whatever the scripts have done since.
+    local state = self.objects[("%d:%d"):format(self.map_index, index)]
+    local ox = (object.x + (state and state.dx or 0)) * world.CELL_PIXELS
+      - camera_x
+    local oy = (object.y + (state and state.dy or 0)) * world.CELL_PIXELS
+      - camera_y - 4
     -- An item ball that has been picked up is gone from the map, not still
-    -- lying there to be walked into.
+    -- lying there to be walked into. So is anyone a script has sent away.
     if object.item and self.taken[("%d:%d"):format(self.map_index, index)] then
       goto continue
     end
-    if not self.world:draw_ow_sprite(object.sprite, ox, oy, "down") then
+    if state and state.hidden then
+      goto continue
+    end
+    if not self.world:draw_ow_sprite(object.sprite, ox, oy,
+      state and state.facing or "down") then
       love.graphics.setColor(0.4, 0.6, 1, 0.75)
       love.graphics.rectangle("fill", ox + 3, oy + 7,
         world.CELL_PIXELS - 6, world.CELL_PIXELS - 6)
