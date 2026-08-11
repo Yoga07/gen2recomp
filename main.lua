@@ -153,7 +153,8 @@ function love.load(args)
           or args[i + 2] == "exp" or args[i + 2] == "blackout"
           or args[i + 2] == "switch" or args[i + 2] == "battleparty"
           or args[i + 2] == "battlebag" or args[i + 2] == "battleswitch"
-          or args[i + 2] == "battleheal"
+          or args[i + 2] == "battleheal" or args[i + 2] == "boxcatch"
+          or args[i + 2] == "pc"
           or args[i + 2] == "menu" or args[i + 2] == "connection"
           or args[i + 2] == "trainer" or args[i + 2] == "bag"
           or args[i + 2] == "pocket" or args[i + 2] == "balls"
@@ -233,7 +234,8 @@ function love.load(args)
       or state.shot.sign == "blackout" or state.shot.sign == "switch"
       or state.shot.sign == "battleparty" or state.shot.sign == "battlebag"
       or state.shot.sign == "battleswitch"
-      or state.shot.sign == "battleheal") then
+      or state.shot.sign == "battleheal" or state.shot.sign == "boxcatch"
+      or state.shot.sign == "pc") then
       state.game:show_first_encounter(state.shot.sign)
     elseif state.shot and state.shot.sign then
       state.game:show_first_sign(state.shot.sign)

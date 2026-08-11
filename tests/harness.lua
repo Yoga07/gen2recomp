@@ -2269,6 +2269,80 @@ local function test_fainting(base_stats)
     against.battle.over == false)
 end
 
+-- The storage boxes.
+local function test_storage(base_stats)
+  log("\n== storage ==")
+  if not base_stats then
+    log("  SKIP  the base stats were not located")
+    return
+  end
+
+  local storage = require("src.engine.storage")
+  local pokemon = require("src.engine.pokemon")
+
+  local function mon(species, level)
+    return pokemon.new(species, base_stats[species], { level = level or 5 })
+  end
+
+  local boxes = storage.new()
+  check_equal("there are fourteen boxes", #boxes.boxes, storage.BOX_COUNT)
+  check_equal("all empty to begin with", boxes:total(), 0)
+  check_equal("and no box is in use", #boxes:used_boxes(), 0)
+
+  check_equal("the first deposit goes in the current box",
+    boxes:deposit(mon(155)), 1)
+  check_equal("which now holds one", boxes:count(1), 1)
+  check_equal("and shows up as used", #boxes:used_boxes(), 1)
+
+  -- Filling the current box rolls on to the next rather than refusing, which
+  -- the games do not do but loses nothing and saves a trip to a menu.
+  for _ = 2, storage.BOX_SIZE do
+    boxes:deposit(mon(25))
+  end
+  check("the first box is full", boxes:is_full(1))
+  check_equal("the next one goes into box two", boxes:deposit(mon(19)), 2)
+  check_equal("box one is untouched", boxes:count(1), storage.BOX_SIZE)
+
+  -- Taking one out.
+  local taken = boxes:withdraw(2, 1)
+  check("something came out", taken ~= nil)
+  check_equal("and box two is empty again", boxes:count(2), 0)
+  check("taking from an empty slot gives nothing",
+    boxes:withdraw(2, 1) == nil)
+  check("as does taking from a box that does not exist",
+    boxes:withdraw(99, 1) == nil)
+
+  -- Completely full.
+  local packed = storage.new()
+  for _ = 1, storage.BOX_COUNT * storage.BOX_SIZE do
+    packed:deposit(mon(19))
+  end
+  check_equal("every box holds twenty", packed:total(),
+    storage.BOX_COUNT * storage.BOX_SIZE)
+  check("and one more has nowhere to go", packed:deposit(mon(19)) == nil)
+
+  -- Round trip through a save. The members are packed the same way the party
+  -- is, so what survives is what survives for a carried Pokémon.
+  local saved = storage.new()
+  saved:deposit(mon(155, 30))
+  saved:deposit(mon(25, 12))
+  saved.boxes[5][1] = mon(251, 70)
+
+  local list = saved:to_list(function(instance)
+    return { species = instance.species, level = instance.level }
+  end)
+  local restored = storage.from_list(list, function(member)
+    return pokemon.new(member.species, base_stats[member.species],
+      { level = member.level })
+  end)
+
+  check_equal("the boxes survive a save", restored:total(), saved:total())
+  check_equal("in the boxes they were in", restored:count(5), 1)
+  check_equal("and the right thing is in box five",
+    restored:box(5)[1].species, 251)
+  check_equal("at the right level", restored:box(5)[1].level, 70)
+end
+
 -- What the field moves clear away.
 local function test_obstacles(rom, map_result)
   log("\n== obstacles ==")
@@ -4137,6 +4211,7 @@ function harness.run(rom_path, report_path)
     test_text_codes()
     test_experience(rom, found and found.base_stats and found.base_stats.records)
     test_fainting(found and found.base_stats and found.base_stats.records)
+    test_storage(found and found.base_stats and found.base_stats.records)
     test_obstacles(rom, map_result)
     test_machines(rom,
       found and found.move_names and found.move_names.records,

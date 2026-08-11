@@ -126,6 +126,9 @@ function save.write(game, state)
       return flags
     end)(),
     money = state.money,
+    -- The boxes, packed the same way the party is. A stored Pokémon is the
+    -- same kind of thing as a carried one; only where it lives differs.
+    boxes = state.storage and state.storage:to_list(pack) or {},
     -- The script flags, as two lists of set indices. Sparse numeric keys
     -- round-trip more predictably as lists, the same as the beaten trainers.
     script_flags = (function()
@@ -212,6 +215,8 @@ function save.read(game, base_stats)
     end)(),
     bag = record.bag,
     money = record.money,
+    storage = require("src.engine.storage").from_list(record.boxes,
+      function(member) return unpack_member(member, base_stats) end),
     script_flags = (function()
       local out = {}
       for space, set in pairs(record.script_flags or {}) do

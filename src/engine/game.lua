@@ -19,6 +19,7 @@ local vm = require("src.engine.vm")
 local events_module = require("src.rom.events")
 local experience = require("src.engine.experience")
 local learnsets = require("src.rom.learnsets")
+local storage = require("src.engine.storage")
 
 local game = {}
 game.__index = game
@@ -76,6 +77,7 @@ function game.new(game_id, start_index)
   instance.hm_moves = cache.read(game_id, "hm_moves") or {}
   -- Which sprites are the cut tree and the boulder, found at import.
   instance.obstacles = cache.read(game_id, "obstacles") or {}
+  instance.storage = storage.new()
   instance.badges = {}
   instance.surfing = false
   instance.std_scripts = cache.read(game_id, "std_scripts")
@@ -147,6 +149,7 @@ function game:save()
     found = self.found,
     bag = self.bag:to_list(),
     money = self.money,
+    storage = self.storage,
     script_flags = self.script_flags,
   })
 
@@ -182,6 +185,7 @@ function game:restore()
   self.taken = state.taken or {}
   self.found = state.found or {}
   self.money = state.money or self.money
+  self.storage = state.storage or self.storage
   if state.script_flags then
     self.script_flags = {
       event = state.script_flags.event or {},
@@ -681,6 +685,24 @@ function game:show_first_encounter(demo)
                 return true
               end
 
+              -- Catching with nowhere to put it. Before the boxes this threw
+              -- the catch away after the ball had been spent.
+              if (demo == "boxcatch" or demo == "pc") and self.battle then
+                local base = self.base_stats[25]
+                while base and #self.party < game.PARTY_LIMIT do
+                  self.party[#self.party + 1] =
+                    pokemon.new(25, base, { level = 5 })
+                end
+                self.battle.opponent.hp = 1
+                self:throw_ball()
+                if demo == "pc" then
+                  self.battle = nil
+                  self.battle_lines = nil
+                  self:open_storage()
+                end
+                return true
+              end
+
               -- The battle menus: the party to switch from, and the bag.
               if (demo == "battleparty" or demo == "battlebag"
                 or demo == "battleswitch" or demo == "battleheal")
@@ -792,7 +814,7 @@ end
 -- Menus
 --------------------------------------------------------------------------------
 
-game.START_ENTRIES = { "POKEMON", "BAG", "SAVE", "CLOSE" }
+game.START_ENTRIES = { "POKEMON", "BAG", "PC", "SAVE", "CLOSE" }
 
 -- What each pocket is called on screen. The cartridge names the pocket an item
 -- belongs to but not the pocket itself, so these labels are ours.
@@ -867,7 +889,12 @@ function game:menu_key(key)
 
   if key == "x" or key == "escape" or key == "backspace" then
     -- Step back one screen rather than closing everything at once.
-    if self.ui.kind == "battle_pocket" then
+    if self.ui.kind == "storage_box" then
+      self:open_storage()
+    elseif self.ui.kind == "storage" then
+      self.ui = { kind = "start",
+                  list = menu.new(game.START_ENTRIES, #game.START_ENTRIES) }
+    elseif self.ui.kind == "battle_pocket" then
       self:open_battle_bag()
     elseif self.ui.kind == "battle_party" or self.ui.kind == "battle_bag" then
       -- Back to the action menu, not out of the battle.
@@ -912,6 +939,87 @@ function game:open_party()
     labels[index] = self:party_label(member)
   end
   self.ui = { kind = "party", list = menu.new(labels, 6) }
+end
+
+--------------------------------------------------------------------------------
+-- The storage boxes.
+--
+-- Reached from the start menu rather than by standing at a PC. The machine is
+-- an object like any other and its script only jumps to a routine we cannot
+-- run, so there is nothing to talk to; putting it on the menu is a deviation
+-- from the games, and it is one rather than the boxes being unreachable.
+--------------------------------------------------------------------------------
+
+--- Which boxes hold anything, plus the party, as a menu.
+function game:open_storage()
+  local labels, choices = {}, {}
+  labels[1] = ("PARTY %d"):format(#(self.party or {}))
+  choices[1] = "party"
+  for _, index in ipairs(self.storage:used_boxes()) do
+    labels[#labels + 1] = ("BOX %d  %d"):format(index,
+      self.storage:count(index))
+    choices[#choices + 1] = index
+  end
+  self.ui = { kind = "storage", choices = choices, list = menu.new(labels, 6) }
+end
+
+--- What is in one box, or in the party.
+function game:open_storage_box(which)
+  local contents, labels = {}, {}
+  if which == "party" then
+    for _, member in ipairs(self.party or {}) do
+      contents[#contents + 1] = member
+      labels[#labels + 1] = self:party_label(member)
+    end
+  else
+    for _, member in ipairs(self.storage:box(which)) do
+      contents[#contents + 1] = member
+      labels[#labels + 1] = self:party_label(member)
+    end
+  end
+  self.ui = { kind = "storage_box", box = which, contents = contents,
+              list = menu.new(labels, 6) }
+end
+
+--- Move one between the party and a box.
+function game:move_stored(slot)
+  local which = self.ui.box
+  local member = self.ui.contents[slot]
+  if not member then
+    return
+  end
+
+  if which == "party" then
+    -- The last one standing does not go in a box; there would be nothing left
+    -- to walk around with.
+    if #self.party <= 1 then
+      self:notify("That's your last POKéMON!")
+      return
+    end
+    for index, candidate in ipairs(self.party) do
+      if candidate == member then
+        table.remove(self.party, index)
+        break
+      end
+    end
+    local box = self.storage:deposit(member)
+    self:notify(box and ("Stored in BOX %d."):format(box)
+      or "Every box is full.")
+    self:open_storage_box("party")
+    return
+  end
+
+  if #(self.party or {}) >= game.PARTY_LIMIT then
+    self:notify("The party is full.")
+    return
+  end
+  local taken = self.storage:withdraw(which, slot)
+  if taken then
+    self:add_to_party(taken)
+    self:notify(("%s joined the party."):format(
+      self.species_names[taken.species] or "?"))
+  end
+  self:open_storage_box(which)
 end
 
 --- The pockets that currently hold something, as a menu.
@@ -1047,6 +1155,19 @@ function game:menu_confirm()
     return
   end
 
+  if kind == "storage" then
+    local which = self.ui.choices[self.ui.list.cursor]
+    if which then
+      self:open_storage_box(which)
+    end
+    return
+  end
+
+  if kind == "storage_box" then
+    self:move_stored(self.ui.list.cursor)
+    return
+  end
+
   if kind == "battle_party" then
     self:switch_to(self.ui.choices[self.ui.list.cursor])
     return
@@ -1075,6 +1196,8 @@ function game:menu_confirm()
       self:open_party()
     elseif choice == "BAG" then
       self:open_bag()
+    elseif choice == "PC" then
+      self:open_storage()
     elseif choice == "SAVE" then
       self:save()
       self:close_menu()
@@ -1202,6 +1325,7 @@ function game:draw_menu()
   -- full width; the short menus sit in the corner the way the games put them.
   local wide = kind == "party" or kind == "pocket" or kind == "mart"
     or kind == "sell" or kind == "battle_party" or kind == "battle_pocket"
+    or kind == "storage_box"
   -- "KEY ITEMS" plus its count does not fit the 76 the short menus use, and a
   -- clipped label is worse than a wider box.
   local width = wide and game.SCREEN_WIDTH or (kind == "bag" and 112 or 76)
@@ -2569,12 +2693,22 @@ function game:throw_ball(chosen)
   local lines = { ("Used %s!"):format(ball.name) }
 
   if caught then
+    local name = self.species_names[opponent.species] or "?"
     if self:add_to_party(opponent) then
-      lines[#lines + 1] = ("Caught %s!")
-        :format(self.species_names[opponent.species] or "?")
+      lines[#lines + 1] = ("Caught %s!"):format(name)
       lines[#lines + 1] = ("Party: %d"):format(#self.party)
     else
-      lines[#lines + 1] = "The party is full!"
+      -- A full party used to throw the catch away after the ball had already
+      -- been spent. It goes to the boxes now.
+      local box = self.storage:deposit(opponent)
+      if box then
+        lines[#lines + 1] = ("Caught %s!"):format(name)
+        lines[#lines + 1] = ("Sent to BOX %d."):format(box)
+      else
+        lines[#lines + 1] = ("Caught %s!"):format(name)
+        lines[#lines + 1] = "But the boxes are"
+        lines[#lines + 1] = "all full!"
+      end
     end
     self.battle.over = true
     self.battle.winner = "player"

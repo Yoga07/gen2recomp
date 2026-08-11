@@ -926,6 +926,32 @@ both facts — who can do it, and whether the badge is held — and the caller
 currently acts on the first. The tests assert both halves separately so the
 distinction cannot blur.
 
+## The storage boxes
+
+Fourteen boxes of twenty. Nothing here is read from the cartridge: the boxes
+live in save RAM rather than in the ROM, so there is no table to find, and the
+counts are the game's written down because there is nowhere else for them to
+come from.
+
+What it fixes is a real loss. Catching with a full party used to print "the
+party is full" **after the ball had already been spent** — the catch succeeded
+and was thrown away. It goes to a box now.
+
+A full current box rolls on to the next rather than refusing. The games make you
+change box by hand; rolling on loses nothing and there is a message either way.
+The last Pokémon in the party cannot be put away, because there would be nothing
+left to walk around with.
+
+Boxes are saved with the same packing the party uses. A stored Pokémon is the
+same kind of thing as a carried one; only where it lives differs.
+
+### Reached from the menu, which is a deviation
+
+The PC is on the start menu rather than being a machine you stand at. The real
+one is a map object whose script only jumps to a routine the interpreter cannot
+run, so there is nothing to talk to. Putting it on the menu is a departure from
+the games and is recorded as one, rather than the boxes being unreachable.
+
 ### Cut trees and boulders are not terrain
 
 The obvious place to look for a cut tree is the collision data, and that search
