@@ -44,6 +44,7 @@ local HEADLESS = {
   ["--probe-dex"] = "tests.probe_dex",
   ["--probe-foreign"] = "tests.probe_foreign",
   ["--probe-cures"] = "tests.probe_cures",
+  ["--probe-whirlpool"] = "tests.probe_whirlpool",
   ["--probe-terrain"] = "tests.probe_terrain",
   ["--probe-time"] = "tests.probe_time",
   ["--dump-tilesets"] = "tests.dump_tilesets",
@@ -170,6 +171,7 @@ function love.load(args)
           or args[i + 2] == "bulk" or args[i + 2] == "script"
           or args[i + 2] == "yesno" or args[i + 2] == "scriptbattle"
           or args[i + 2] == "surf" or args[i + 2] == "nosurf"
+          or args[i + 2] == "whirlpool" or args[i + 2] == "nowhirlpool"
           or args[i + 2] == "cut" or args[i + 2] == "nocut"
           or args[i + 2] == "strength"
           or args[i + 2] == "faceleft"
@@ -207,6 +209,9 @@ function love.load(args)
     elseif state.shot and (state.shot.sign == "surf"
       or state.shot.sign == "nosurf") then
       state.game:show_surf_demo(state.shot.sign == "surf")
+    elseif state.shot and (state.shot.sign == "whirlpool"
+      or state.shot.sign == "nowhirlpool") then
+      state.game:show_whirlpool_demo(state.shot.sign == "whirlpool")
     elseif state.shot and state.shot.sign == "scriptbattle" then
       state.game:show_script_battle_demo()
     elseif state.shot and state.shot.sign == "yesno" then

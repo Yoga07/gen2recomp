@@ -2480,6 +2480,158 @@ local function test_storage(base_stats)
   check_equal("at the right level", restored:box(5)[1].level, 70)
 end
 
+-- Which collision value is a whirlpool.
+--
+-- This was open for a long time because the question was being asked the wrong
+-- way round: two dozen values are water and a value's number says nothing. What
+-- settles it is what a whirlpool has to *do* — be rare, stand alone, and sit in
+-- open water — and then looking at the art, which is what actually decided it.
+local function test_whirlpool(rom, tileset_result, map_result)
+  log("\n== whirlpool ==")
+  if not tileset_result or not map_result then
+    log("  SKIP  the tilesets or maps were not located")
+    return
+  end
+
+  local whirlpool = require("src.rom.whirlpool")
+  local collision = require("src.rom.collision")
+
+  local result, why = whirlpool.locate(rom, tileset_result, map_result)
+  if not check("the whirlpool value was found", result ~= nil, why) then
+    return
+  end
+
+  log("        collision $%02X, %d cells on %d maps", result.value,
+    result.cells, result.maps)
+  check("it is water", collision.is_water(result.value))
+
+  -- The whole survey, because the answer only means something beside the
+  -- values it was chosen over.
+  local values = {}
+  for value in pairs(result.survey) do
+    values[#values + 1] = value
+  end
+  table.sort(values)
+
+  log("        value | cells | maps | clusters | mean size | in a channel")
+  for _, value in ipairs(values) do
+    local record = result.survey[value]
+    if record.cells > 0 then
+      log("         $%02X  | %5d | %4d | %8d | %9.1f | %3d%%%s", value,
+        record.cells, record.maps, record.clusters,
+        record.cells / math.max(record.clusters, 1),
+        math.floor(record.in_channel / record.cells * 100),
+        value == result.value and "   <-- chosen" or "")
+    end
+  end
+
+  local chosen = result.survey[result.value]
+  check_equal("every occurrence stands alone", chosen.clusters, chosen.cells)
+  check("most of them have water on both sides",
+    chosen.in_channel >= chosen.cells * 0.5)
+  check("it is rare", chosen.maps <= whirlpool.MAX_MAPS)
+
+  -- The three tests together are what pick it out, and no other water value
+  -- passes all three. That is the claim the locator rests on, so it is asserted
+  -- rather than described: the ordinary sea is far too common, the coastlines
+  -- clump, and the one other value whose cells stand alone is never in water.
+  local rivals = {}
+  for _, value in ipairs(values) do
+    local record = result.survey[value]
+    if value ~= result.value and record.cells > 0
+      and record.maps <= whirlpool.MAX_MAPS
+      and record.clusters >= record.cells
+      and record.in_channel >= record.cells * 0.5 then
+      rivals[#rivals + 1] = ("$%02X"):format(value)
+    end
+  end
+  check_equal("no other water value is rare, isolated and in the water",
+    #rivals, 0, table.concat(rivals, ", "))
+
+  -- Where it sits. A whirlpool guards sea routes; a waterfall would be mostly
+  -- caves, so the split is worth recording as a second, independent check on
+  -- which of the two field moves this value belongs to.
+  local by_environment = {}
+  for index, header in ipairs(map_result.headers) do
+    if not header.unparsed and header.attributes then
+      local set = tilesets.decode_collision(rom,
+        tileset_result.headers[header.tileset])
+      local blocks = maps.decode_block_data(rom, header)
+      if set and blocks then
+        local found = false
+        for _, row in ipairs(blocks) do
+          for _, block in ipairs(row) do
+            local entry = set[block + 1]
+            for _, quadrant in ipairs(entry or {}) do
+              found = found or quadrant == result.value
+            end
+          end
+        end
+        if found then
+          -- The header stores the environment as a byte; the names live in the
+          -- map decoder rather than being repeated here.
+          local name = maps.environments[header.environment] or "?"
+          by_environment[name] = (by_environment[name] or 0) + 1
+          log("        map %3d is a %s", index, tostring(name))
+        end
+      end
+    end
+  end
+  check("it is mostly on routes rather than in caves",
+    (by_environment["route"] or 0) > (by_environment["cave"] or 0))
+
+  -- And in the engine's hands: water you cannot cross until somebody can.
+  local cache_module = require("src.import.cache")
+  local world = require("src.engine.world")
+  local game_id
+  for _, entry in ipairs(cache_module.list_games()) do
+    if entry.current then
+      game_id = entry.game
+    end
+  end
+  if not game_id then
+    log("  SKIP  no import in the cache for the engine half")
+    return
+  end
+
+  local loaded = world.load(game_id)
+  if not loaded then
+    return
+  end
+  check_equal("the engine reads the same value from the cache",
+    loaded.whirlpool, result.value)
+
+  -- Find one and stand next to it.
+  local found_map, wx, wy
+  for index = 1, loaded:map_count() do
+    local map = loaded:map(index)
+    if not map.unparsed then
+      for cell_y = 0, map.height * world.CELLS_PER_BLOCK - 1 do
+        for cell_x = 0, map.width * world.CELLS_PER_BLOCK - 1 do
+          if loaded:is_whirlpool(map, cell_x, cell_y) then
+            found_map, wx, wy = map, cell_x, cell_y
+            break
+          end
+        end
+        if found_map then break end
+      end
+    end
+    if found_map then break end
+  end
+
+  if not check("the engine can find one on a map", found_map ~= nil) then
+    return
+  end
+
+  check("it reads as water", loaded:is_water(found_map, wx, wy))
+  check("surfing does not get you across it",
+    loaded:can_enter(found_map, wx, wy, true, false) == false)
+  check("but knowing WHIRLPOOL does",
+    loaded:can_enter(found_map, wx, wy, true, true))
+  check("and on foot it is still water either way",
+    loaded:can_enter(found_map, wx, wy, false, true) == false)
+end
+
 -- Which status each curing item undoes.
 local function test_cures(rom, item_names, item_records, base_stats)
   log("\n== status cures ==")
@@ -4932,6 +5084,7 @@ function harness.run(rom_path, report_path, other_rom)
     test_dex(rom, found and found.species_names and found.species_names.records)
     test_dex_tracking(found and found.base_stats and found.base_stats.records)
     test_obstacles(rom, map_result)
+    test_whirlpool(rom, tileset_result, map_result)
     test_machines(rom,
       found and found.move_names and found.move_names.records,
       found and found.base_stats and found.base_stats.records)

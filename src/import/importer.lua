@@ -25,6 +25,7 @@ local std_scripts = require("src.rom.std_scripts")
 local music = require("src.rom.music")
 local machines = require("src.rom.machines")
 local obstacles = require("src.rom.obstacles")
+local whirlpool = require("src.rom.whirlpool")
 local learnsets = require("src.rom.learnsets")
 local dex = require("src.rom.dex")
 local cures = require("src.rom.cures")
@@ -600,6 +601,21 @@ function importer.run(path, progress)
         cache.write(descriptor.game, "obstacles", obstacle_result)
       end
 
+      -- Which water value is a whirlpool. Found by what it does rather than
+      -- listed: rare, isolated, and with water on both sides.
+      local whirl_result, whirl_err = whirlpool.locate(rom, tileset_result,
+        map_result)
+      if not whirl_result then
+        failed.whirlpool = whirl_err
+      else
+        map_summary.whirlpool = whirl_result.value
+        map_summary.whirlpool_cells = whirl_result.cells
+        map_summary.whirlpool_maps = whirl_result.maps
+        cache.write(descriptor.game, "whirlpool",
+          { value = whirl_result.value, cells = whirl_result.cells,
+            maps = whirl_result.maps })
+      end
+
       -- The bytecode, decoded once for the whole game. Scripts jump into each
       -- other across maps, so this is keyed by bank and address rather than
       -- gathered per map, which dedupes the shared tails as well.
@@ -798,6 +814,11 @@ function importer.format_report(report)
       lines[#lines + 1] = ("  %-16s cut tree is sprite %d, boulder is %d")
         :format("obstacles", report.maps.tree_sprite,
           report.maps.boulder_sprite)
+    end
+    if report.maps.whirlpool then
+      lines[#lines + 1] = ("  %-16s collision $%02X, %d cells on %d maps")
+        :format("whirlpool", report.maps.whirlpool,
+          report.maps.whirlpool_cells, report.maps.whirlpool_maps)
     end
   end
 

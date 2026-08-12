@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 51 commits in, 678 tests passing
-against Crystal and none failing — 696 with a second, deliberately wrong
+Written at commit `6db0197` and updated since, 52 commits in, 691 tests passing
+against Crystal and none failing — 709 with a second, deliberately wrong
 cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
@@ -42,7 +42,7 @@ is one at `C:\Users\yoges\Downloads\Pokemon - Red Version (UE)[!] (1)\`.
 
 It needs `$env:LOVE_EXE` pointing at `love.exe`.
 
-`cache.FORMAT_VERSION` is 3 as of the status cures. A cache written by an earlier
+`cache.FORMAT_VERSION` is 4 as of the whirlpool value. A cache written by an earlier
 build is reported as stale and has to be re-imported rather than half-read, so
 the first thing a new session does after checking out is usually `--import`.
 
@@ -56,14 +56,14 @@ love . --shot <png> <mode>
 love . --probe-<name> <rom> <report> [extra]
 ```
 
-There are 36 probes. They are diagnostics kept from each investigation, not
+There are 37 probes. They are diagnostics kept from each investigation, not
 tests — `--probe-vm`, `--probe-channels`, `--probe-terrain` and `--probe-time`
 are the ones most likely to be useful again. `--shot <mode>` renders one frame
 of the running game and exits; the modes are listed in `main.lua` and cover
 every feature (`grass`, `catch`, `trainer`, `mart`, `sell`, `surf`, `cut`,
 `strength`, `pc`, `boxcatch`, `exp`, `blackout`, `battleparty`, `battleheal`,
 `yesno`, `scriptbattle`, `faceleft`, `dex`, `dexentry`, `poisoned`, `cured`,
-and more). `dexentry`
+`whirlpool`, `nowhirlpool`, and more). `dexentry`
 takes an optional species number as a fourth argument, so a particular entry's
 layout can be looked at rather than whichever one the demo picks.
 
@@ -138,14 +138,13 @@ script instructions.
 The engine plays: overworld, warps, connections, wild and trainer battles,
 catching, experience and levelling, evolution, fainting and blackout, switching,
 the bag in and out of battle, shops, the script interpreter with yes/no prompts,
-Surf, Cut, Strength, storage boxes, the clock, the Pokédex, and reading a real
-`.sav`.
+Surf, Cut, Strength, Whirlpool, storage boxes, the clock, the Pokédex, status
+cures, and reading a real `.sav`.
 
 ### What is left, and what is in the way
 
 | | state |
 |---|---|
-| Whirlpool | the water collision value is not identified |
 | Badges | tracked and gated, but nothing awards them |
 | Audio playback | channel bytecode unsolved; then a sound chip to write |
 | `special` routines | 127 of them, assembly, not runnable from bytecode |

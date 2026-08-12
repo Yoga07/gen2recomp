@@ -1190,13 +1190,70 @@ Strength does not move a boulder; it makes the boulder movable, and walking into
 it afterwards is what pushes, one cell at a time, into anywhere the player could
 themselves have stood.
 
-### Whirlpool
+### Whirlpool, and asking the question the other way round
 
-Not done. It is a water tile rather than an object, and which of the water
-collision values it is has not been established — `$21`, `$23`, `$24`, `$27`,
-`$29`, `$2B`, `$2C`, `$30`–`$3B` and `$C0`–`$C7` are all water, and nothing
-seen so far distinguishes a whirlpool among them. Guessing would be the third
-wrong answer in this section rather than the first.
+This was open for a long time, and the note that stood here said why: about two
+dozen values are water, and nothing about a value's number distinguishes one of
+them. That was true, and it was also the wrong question. "Which of these values
+is the whirlpool" has no answer, because it is a question about the value.
+
+What a whirlpool must *do* is answerable, and all three parts are measurable:
+it is needed in a handful of places, it is one cell rather than a stretch of
+coastline, and it has water on both sides because you cross it. Measured across
+every water value on every map:
+
+| value | cells | maps | clusters | mean cluster | in a channel |
+|---|---|---|---|---|---|
+| `$21` | 64 | 2 | 18 | 3.6 | 0% |
+| `$23` | 714 | 13 | 29 | 24.6 | 0% |
+| **`$24`** | **29** | **4** | **29** | **1.0** | **89%** |
+| `$27` | 1809 | 47 | 250 | 7.2 | 43% |
+| `$29` | 11263 | 73 | 496 | 22.7 | 2% |
+| `$33` | 18 | 4 | 6 | 3.0 | 0% |
+
+`$24` is the only value whose **every occurrence is a single isolated cell** —
+29 cells in 29 clusters — and the only rare one sitting in open water. `$32` also
+manages mean cluster size 1, on three cells, but none of them has water on both
+sides, so it is not something anyone would ever cross.
+
+#### The measurement is a fit; the art is the evidence
+
+Everything above is a statistic about where a value sits, and this section
+exists because that kind of statistic has produced two confident wrong answers
+already — the cut tree that "gated a path" 62% of the time was a fence, and the
+obstacle detector's first answer was the Pokémon Centre nurse. Both were caught
+by rendering the thing and looking at it.
+
+So that is what settled this too. Rendering every block that carries each
+candidate shows `$21` as the pier at Olivine, `$23` as plain water and indoor
+tiling, `$33` as a wave pattern — and **`$24` as a spiral**. One block, one
+swirl, in the tilesets the sea routes use. A whirlpool looks like a whirlpool
+and nothing else here does.
+
+There is a second, independent check that costs nothing: **where** the four maps
+are. Three are routes and one is a cave. A whirlpool guards sea routes; a
+waterfall would be mostly caves, so the split says which of the two field moves
+this value belongs to without either being assumed.
+
+The first gating measure tried was the one that had failed before, in its global
+form: flood the map's water, flood it again with the candidate removed, and see
+whether the sea falls apart. `$24` splits nothing on any of its four maps, which
+looked at first like a refutation and is not. A whirlpool in Crystal does not
+dam a channel — it guards a way in, sitting in open water that surrounds it on
+every side. The measure was answering a question about geography that the
+feature does not have.
+
+#### In the engine
+
+The value is found at import and written to the cache, so nothing names `$24` —
+Gold and Silver work from the same code and a cartridge where it lands elsewhere
+still works. `can_enter` gains one more condition: while surfing, water is
+enterable unless it is a whirlpool and nobody in the party knows the move, which
+comes through the machine list the same way Surf does.
+
+Unlike a cut tree or a boulder, **a whirlpool is not cleared away**. The water
+stays a whirlpool once you are past it, so there is no runtime state to keep —
+the only question is whether the party can cross, asked afresh each step.
 
 ### Surf
 

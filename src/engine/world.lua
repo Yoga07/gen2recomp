@@ -47,6 +47,10 @@ function world.load(game)
     -- Overworld sprites are optional: without them the engine draws
     -- placeholders rather than refusing to run.
     ow_sprites = cache.read(game, "ow_sprites") or {},
+    -- Which collision value is a whirlpool, found at import rather than named
+    -- here. Absent on a cache written before it was identified, in which case
+    -- there are simply no whirlpools and the sea is open.
+    whirlpool = (cache.read(game, "whirlpool") or {}).value,
     images = {},   -- tileset index -> Image
     quads = {},    -- tileset index -> array of Quads, one per tile
     batches = {},  -- tileset index -> SpriteBatch
@@ -210,6 +214,17 @@ function world:is_water(map, cell_x, cell_y)
   return value ~= nil and collision.is_water(value)
 end
 
+--- Is this cell a whirlpool?
+--
+-- Water, and crossable only by someone who can clear it. Which value that is
+-- was found at import; nothing here names one.
+function world:is_whirlpool(map, cell_x, cell_y)
+  if not self.whirlpool then
+    return false
+  end
+  return self:collision_at(map, cell_x, cell_y) == self.whirlpool
+end
+
 --- Which edge, if any, a cell lies beyond.
 function world:edge_beyond(map, cell_x, cell_y)
   local width = map.width * world.CELLS_PER_BLOCK
@@ -262,7 +277,8 @@ end
 -- warp, rather than standing on it. So a warp overrides terrain.
 -- @param surfing when true, water is what carries the player and land is
 --        reached by riding onto it
-function world:can_enter(map, cell_x, cell_y, surfing)
+-- @param clears_whirlpools true when somebody in the party knows Whirlpool
+function world:can_enter(map, cell_x, cell_y, surfing, clears_whirlpools)
   if self:warp_at(map, cell_x, cell_y) then
     return true
   end
@@ -274,6 +290,12 @@ function world:can_enter(map, cell_x, cell_y, surfing)
   end
 
   if surfing and self:is_water(map, cell_x, cell_y) then
+    -- A whirlpool is water you cannot simply swim across. It stays blocking
+    -- until somebody in the party can clear it, which is what makes the HM
+    -- worth having.
+    if self:is_whirlpool(map, cell_x, cell_y) and not clears_whirlpools then
+      return false
+    end
     return true
   end
 

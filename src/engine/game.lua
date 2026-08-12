@@ -513,6 +513,45 @@ function game:show_surf_demo(taught)
   return false
 end
 
+--- Sit on the water beside a whirlpool and face it.
+-- @param taught true to give the leader the HM first, so both answers show
+function game:show_whirlpool_demo(taught)
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed then
+      local width = map.width * world.CELLS_PER_BLOCK
+      local height = map.height * world.CELLS_PER_BLOCK
+      for cell_y = 0, height - 1 do
+        for cell_x = 0, width - 1 do
+          if self.world:is_whirlpool(map, cell_x, cell_y) then
+            -- Stand on ordinary water next to it, looking at it. Which side
+            -- does not matter, so take whichever neighbour is plain water.
+            for _, delta in ipairs({ { 0, 1, "up" }, { 0, -1, "down" },
+                                     { 1, 0, "left" }, { -1, 0, "right" } }) do
+              local from_x = cell_x + delta[1]
+              local from_y = cell_y + delta[2]
+              if self.world:is_water(map, from_x, from_y)
+                and not self.world:is_whirlpool(map, from_x, from_y) then
+                self:enter(index, from_x, from_y, delta[3])
+                self.surfing = true
+
+                local leader = self:party_leader()
+                if leader and taught and self.hm_moves.WHIRLPOOL then
+                  leader.moves[#leader.moves + 1] = self.hm_moves.WHIRLPOOL
+                end
+
+                self:interact()
+                return true
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
 --- Find a script that starts a battle, and let it.
 function game:show_script_battle_demo()
   for index = 1, self.world:map_count() do
@@ -2278,6 +2317,24 @@ function game:push_boulder()
   return true
 end
 
+--- Can anybody in the party clear a whirlpool?
+--
+-- Which HM that is comes from the machine list the importer read, so the move
+-- is not named here any more than Surf is.
+function game:clears_whirlpools()
+  return self:knows_field_move("WHIRLPOOL") ~= nil
+end
+
+--- Facing a whirlpool that is in the way, if there is one.
+function game:facing_whirlpool()
+  if not self.surfing then
+    return false
+  end
+  local delta = FACING_DELTA[self.player.facing]
+  return self.world:is_whirlpool(self.map,
+    self.player.cell_x + delta[1], self.player.cell_y + delta[2])
+end
+
 --- Get on the water, or off it.
 function game:toggle_surf()
   local delta = FACING_DELTA[self.player.facing]
@@ -2677,6 +2734,22 @@ function game:interact()
     return
   end
 
+  -- A whirlpool in the way, while surfing. Unlike a tree or a boulder it is
+  -- not cleared away — the water stays a whirlpool once you are past it — so
+  -- this only says what is there and whether anyone can get through it.
+  if self:facing_whirlpool() then
+    local member = self:knows_field_move("WHIRLPOOL")
+    if member then
+      self:say({
+        ("%s used"):format(self.species_names[member.species] or "?"),
+        "WHIRLPOOL!",
+      })
+    else
+      self:say({ "A whirlpool is", "blocking the way." })
+    end
+    return
+  end
+
   -- Facing water with something that can swim is an offer to get on it.
   if self:toggle_surf() then
     return
@@ -2725,7 +2798,8 @@ function game:update(dt)
 
   local event, cell_x, cell_y = self.player:update(dt, self:held_direction(),
     function(x, y)
-      return self.world:can_enter(self.map, x, y, self.surfing)
+      return self.world:can_enter(self.map, x, y, self.surfing,
+        self:clears_whirlpools())
     end)
 
   if event == "arrived" then
