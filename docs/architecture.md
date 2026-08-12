@@ -87,12 +87,94 @@ tables. Structure alone is too weak: "four 15-bit words" matches every
 zero-filled region in the cartridge. The tempting extra constraint — that the
 first colour of each pair is the brighter one — sounds like it must hold of a
 light/dark pair and does not; enforcing it caps the longest run in the ROM at
-98 records against the 251 needed. What settles it is hue: Bulbasaur is green,
-Charmander red, Pikachu yellow.
+98 records against the 251 needed. What settles it is hue.
 
 Note that with only two colours stored, the light slot holds whatever dominates
 the lit areas rather than the creature's "main" colour. Oddish's light colour is
 the green of its leaves, not the blue of its body.
+
+### How weak "structure narrows it down" actually was
+
+This section used to end at "what settles it is hue: Bulbasaur is green,
+Charmander red, Pikachu yellow", and the module said in its own header that the
+251-record run was "a signature nothing else in the cartridge satisfies".
+
+Both claims were wrong, and neither was ever measured. Counting properly:
+
+| | offsets surviving |
+|---|---|
+| 251 consecutive colour-shaped records | **34,026** |
+| ...that are also green, red and yellow at 1, 4 and 25 | **461** |
+| ...under all eight hues now checked | **1** |
+
+The structural test is satisfied tens of thousands of times, because any stretch
+of ROM where the top bit of every other byte happens to be clear qualifies —
+which is most of a cartridge. So hue was carrying the entire decision, and three
+hues left 461 candidates standing. **The locator returned the first of them**,
+which on Crystal is the real table. It was right by scan order rather than by
+validation, and every other search in this project would have refused.
+
+What exposed it was running the locators against a cartridge they were never
+meant to read. The palette search was the one thing that **accepted a Pokémon
+Red image**, confidently and silently.
+
+### Choosing more hues, and the six that had to be dropped
+
+Fourteen species were proposed from outside this code and each was checked
+against the located table before being trusted. **Six failed**, and they failed
+for the reason recorded above rather than because anything was wrong: only two
+colours are stored, and the light slot holds whatever dominates the lit areas.
+Squirtle's reads yellow — its plastron. Lapras and Snorlax both read red,
+Chikorita yellow, Porygon red, and Voltorb is grey enough that no channel leads.
+
+Those are bad checks, not a bad table. Bending each expectation to match what
+the table said would have turned the list into a fit to Crystal instead of a set
+of facts about Pokémon, so they were dropped. The eight that survive — adding
+Caterpie, Psyduck, Magikarp, Totodile and Celebi — take 461 to 1, and the
+locator now collects every candidate and refuses when more than one survives,
+which is the rule the rest of the project already followed.
+
+The general lesson is the one this document keeps relearning, in a place nobody
+had thought to look: **a validation step nobody has counted is a guess with good
+manners.** "Structure narrows it down, known content decides" was true as far as
+it went, and the number it left standing was 461.
+
+## Refusing a cartridge this was never meant to read
+
+The README claims that a dump which would decode into nonsense fails loudly.
+That had been asserted for fifty commits without evidence, because the only
+cartridge ever fed to the importer was the one it was written for.
+
+The importer does refuse a Gen 1 image — on the **title string**, which is the
+weakest check in the project and says nothing whatever about the searches. So
+the test runs the searches directly, with the version gate out of the way.
+
+A Gen 1 cartridge is the right adversary rather than random noise. It carries
+species names in nearly the same encoding, padded to the same ten bytes, and
+tables of its own for moves, items and base stats. It is exactly the dump that
+would decode into plausible garbage if validation were only as strong as the
+signature that found it — and **three of the six named tables do have their
+signature occur in it**. `BULBASAUR` padded to ten bytes is in Pokémon Red,
+because Gen 1 pads its names the same way.
+
+All three are then thrown out by whole-table validation and the spot checks,
+which is the claim being tested: the signature is the search, and the validation
+is what makes the search safe. Seventeen locators, seventeen refusals — after
+the palette one was fixed, which is how the weakness above was found in the
+first place.
+
+This is asserted in the suite rather than left as a probe, and it takes the
+second cartridge as an optional argument so an ordinary run skips it:
+
+```
+scripts\test.ps1 -Rom <crystal> -Other <any non-Gen-2 cartridge>
+```
+
+**What this still does not establish** is the other half of the claim: that
+Gold and Silver work from the same code path. Refusing a Gen 1 image says the
+searches reject what they should reject; it says nothing about whether they
+accept what they should accept. That needs a Gold or Silver ROM, and there is
+not one on this machine.
 
 ## Tilesets, and why block count is derived
 

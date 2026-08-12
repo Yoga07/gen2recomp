@@ -5,10 +5,25 @@
 -- which is why the table is far smaller than it first appears. Each species
 -- carries a normal pair and a shiny pair, so a record is four BGR555 words.
 --
--- Locating the table needs no known colour values. Every stored word is a
--- 15-bit colour, so bit 15 is always clear, and within each pair the first
--- colour is the lighter one. Requiring both to hold across 251 consecutive
--- records is a signature nothing else in the cartridge satisfies.
+-- Locating the table needs known colour values, and it needs more of them than
+-- it looks like it should.
+--
+-- The structural test — 251 consecutive records of four 15-bit words, not all
+-- zero — was once described here as "a signature nothing else in the cartridge
+-- satisfies". That was wrong by four orders of magnitude: **34,026 offsets in
+-- Crystal satisfy it**. Every region of the ROM where the top bit of every
+-- other byte happens to be clear qualifies, which is most of it.
+--
+-- Hue is what actually discriminates, and three hues were not enough either.
+-- Bulbasaur green, Charmander red and Pikachu yellow leave **461** candidates
+-- standing. The locator used to return the first of them, which on Crystal is
+-- the real table — so it was right by scan order rather than by validation, and
+-- handed a Pokémon Red image it accepted a confident wrong answer.
+--
+-- Seven hues bring that to exactly one. The margin is measured in the test
+-- suite rather than asserted here, and the locator now refuses when more than
+-- one candidate survives, which is the rule the rest of this project follows and
+-- this file did not.
 
 local gfx = require("src.rom.gfx")
 local bytes = require("src.util.bytes")
@@ -60,11 +75,38 @@ end
 --- Species whose colour is not in dispute, used to tell the real table from
 -- any other run of colour-shaped words. Same approach as the data tables:
 -- structure narrows it down, known content decides.
-local SPOT_CHECKS = {
-  [1] = "g",       -- Bulbasaur
-  [4] = "r",       -- Charmander
-  [25] = "yellow", -- Pikachu
+--
+-- Choosing these needs care, because only two colours are stored and the light
+-- slot holds whatever dominates the *lit areas* rather than the creature's main
+-- colour. Fourteen species were proposed from outside this code and each was
+-- checked against the located table before being trusted; **six had to be
+-- dropped**. Squirtle's light colour reads yellow, not blue — its plastron.
+-- Lapras and Snorlax both read red, Chikorita yellow, Porygon red, and Voltorb
+-- is grey enough that no channel leads. Those are bad checks, not a bad table,
+-- and bending the expectation to match would have turned this list into a fit
+-- to Crystal rather than a set of facts about Pokémon.
+--
+-- What each one buys, against 34,026 offsets that pass the structural test:
+--
+--   Bulbasaur   14976        Magikarp      63
+--   Charmander   2917        Totodile       9
+--   Pikachu       461        Psyduck        1
+--   Caterpie      222        Celebi         1
+--
+-- Celebi adds nothing on this cartridge and is kept anyway: a check that is
+-- redundant here is margin on a cartridge where another one lands differently.
+palettes.SPOT_CHECKS = {
+  [1] = "g",        -- Bulbasaur
+  [4] = "r",        -- Charmander
+  [10] = "g",       -- Caterpie
+  [25] = "yellow",  -- Pikachu
+  [54] = "yellow",  -- Psyduck
+  [129] = "r",      -- Magikarp
+  [158] = "b",      -- Totodile
+  [251] = "g",      -- Celebi
 }
+
+local SPOT_CHECKS = palettes.SPOT_CHECKS
 
 local function read_record(data, offset)
   return {
@@ -93,7 +135,11 @@ function palettes.locate(rom)
     end
   end
 
-  local candidates = 0
+  -- Every candidate is collected rather than the first one being returned. The
+  -- structural test passes tens of thousands of times, so "the first that also
+  -- matches the hues" was scan order making the decision; two survivors mean
+  -- the checking is weaker than it looks and that is a refusal, not a choice.
+  local candidates, accepted = 0, {}
   for offset = 0, limit do
     if run[offset] >= wanted then
       candidates = candidates + 1
@@ -108,18 +154,37 @@ function palettes.locate(rom)
       end
 
       if ok then
-        local records = {}
-        for species = 1, wanted do
-          records[species] = read_record(data, offset + (species - 1) * stride)
-        end
-        return { offset = offset, records = records, candidates = candidates }
+        accepted[#accepted + 1] = offset
       end
     end
   end
 
-  return nil, ("%d offsets held %d consecutive colour records but none had the " ..
-    "expected hues for Bulbasaur, Charmander and Pikachu")
-    :format(candidates, wanted)
+  if #accepted == 0 then
+    return nil, ("%d offsets held %d consecutive colour records but none had " ..
+      "the expected hues for %d known species")
+      :format(candidates, wanted, (function()
+        local n = 0
+        for _ in pairs(SPOT_CHECKS) do n = n + 1 end
+        return n
+      end)())
+  end
+
+  if #accepted > 1 then
+    local places = {}
+    for index = 1, math.min(#accepted, 6) do
+      places[#places + 1] = ("0x%06X"):format(accepted[index])
+    end
+    return nil, ("the palette table validated at %d offsets (%s%s); refusing " ..
+      "to guess"):format(#accepted, table.concat(places, ", "),
+        #accepted > 6 and ", ..." or "")
+  end
+
+  local offset = accepted[1]
+  local records = {}
+  for species = 1, wanted do
+    records[species] = read_record(data, offset + (species - 1) * stride)
+  end
+  return { offset = offset, records = records, candidates = candidates }
 end
 
 --- Build a renderable four-colour palette from a stored pair.

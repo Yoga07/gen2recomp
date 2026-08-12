@@ -98,9 +98,10 @@ Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-649 tests pass against Crystal (USA/Europe) rev 1, SHA-1
-`f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
-until it round-trips against content known independently of this code.
+652 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+`f2f52230b536214ef7c9924f483392993e226cfb`, and a further 17 run when a second,
+deliberately wrong cartridge is supplied — 669 in all. Nothing is claimed to be
+correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these
 itself and does not depend on them:
@@ -163,6 +164,24 @@ the import refuses to guess and says so.
 
 The upshot is that Gold, Silver, Crystal, and their revisions all work from the
 same code, and a dump that would have decoded into nonsense fails loudly.
+
+The second half of that is tested rather than asserted. Pass a non-Gen-2
+cartridge as `-Other` and the suite runs every locator against it and requires
+all of them to refuse:
+
+```bash
+scripts\test.ps1 -Rom "<crystal>" -Other "<a Gen 1 cartridge>"
+```
+
+A Gen 1 image is the interesting adversary, because it pads its species names to
+the same ten bytes in nearly the same encoding — three of the six signatures do
+occur in it, and validation is what throws them out. Finding that test also
+found a real bug: the sprite-palette search used to accept a Pokémon Red image.
+See the architecture notes.
+
+The **first** half is still only a design claim. Nothing hardcodes Crystal, but
+the importer has only ever been run against Crystal; confirming it against Gold
+or Silver needs a cartridge nobody here has.
 
 Discovered offsets are recorded in each cache's `manifest.lua`.
 

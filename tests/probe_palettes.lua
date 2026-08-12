@@ -143,6 +143,122 @@ function probe.run(rom_path, report_path)
     end
   end
 
+  -- How much room does the search actually have to be wrong?
+  --
+  -- This module's own header claimed the 251-record run was "a signature
+  -- nothing else in the cartridge satisfies". Running every locator against a
+  -- Gen 1 cartridge showed otherwise: the palette search was the one thing that
+  -- accepted a Pokémon Red image. Counting properly says why -- the run test is
+  -- satisfied tens of thousands of times over, and the three hue checks are
+  -- applied to every offset in every long enough run, so a single long run
+  -- offers hundreds of separate chances to pass them by luck.
+  --
+  -- The locator survives on Crystal by returning the first candidate, which
+  -- happens to be the real table. That is scan order doing the work, not
+  -- validation, and it is exactly the kind of metric this project has been
+  -- caught by before.
+  log("\n== how many offsets survive each check ==")
+  do
+    local palettes = require("src.rom.palettes")
+    local data = rom.data
+    local stride = palettes.RECORD_SIZE
+
+    local function plausible(offset)
+      if offset + stride > #data then
+        return false
+      end
+      local any = false
+      for i = 0, palettes.COLORS_PER_RECORD - 1 do
+        local word = bytes.u16le(data, offset + i * 2)
+        if bytes.band(word, 0x8000) ~= 0 then
+          return false
+        end
+        if word ~= 0 then
+          any = true
+        end
+      end
+      return any
+    end
+
+    local run = {}
+    for offset = rom.size - stride, 0, -1 do
+      run[offset] = plausible(offset) and ((run[offset + stride] or 0) + 1) or 0
+    end
+
+    local candidates = {}
+    for offset = 0, rom.size - stride do
+      if run[offset] >= WANT then
+        candidates[#candidates + 1] = offset
+      end
+    end
+    log("  %d offsets hold %d consecutive colour-shaped records",
+      #candidates, WANT)
+
+    -- What the real table says, so a proposed check can be confirmed against it
+    -- rather than asserted. A species whose stored light colour is not the one
+    -- an outsider would name is a bad check, not a bad table: only two colours
+    -- are stored and the light slot holds whatever dominates the lit areas.
+    local located = palettes.locate(rom)
+    if located then
+      log("  the locator returns 0x%06X", located.offset)
+
+      -- The hypothesis: species whose colour is not in dispute. Each is
+      -- checked against the real table before being trusted.
+      local proposed = {
+        { 1, "g", "BULBASAUR" },   { 4, "r", "CHARMANDER" },
+        { 25, "yellow", "PIKACHU" }, { 7, "b", "SQUIRTLE" },
+        { 10, "g", "CATERPIE" },   { 129, "r", "MAGIKARP" },
+        { 131, "b", "LAPRAS" },    { 143, "b", "SNORLAX" },
+        { 152, "g", "CHIKORITA" }, { 158, "b", "TOTODILE" },
+        { 54, "yellow", "PSYDUCK" }, { 251, "g", "CELEBI" },
+        { 137, "b", "PORYGON" },   { 100, "r", "VOLTORB" },
+      }
+
+      log("\n  what the real table says about each proposed check:")
+      local usable = {}
+      for _, entry in ipairs(proposed) do
+        local species, want, name = entry[1], entry[2], entry[3]
+        local record = located.records[species]
+        local actual = palettes.dominant(record.normal[1])
+        local verdict = actual == want and "usable" or "NOT usable"
+        log("    %3d %-11s expected %-6s table says %-6s  %s",
+          species, name, want, actual, verdict)
+        if actual == want then
+          usable[#usable + 1] = { species = species, want = want, name = name }
+        end
+      end
+
+      log("\n  survivors as the usable checks accumulate:")
+      local surviving = candidates
+      for index, check in ipairs(usable) do
+        local next_round = {}
+        for _, offset in ipairs(surviving) do
+          local word = bytes.u16le(data,
+            offset + (check.species - 1) * stride)
+          if palettes.dominant(word) == check.want then
+            next_round[#next_round + 1] = offset
+          end
+        end
+        surviving = next_round
+        local still = false
+        for _, offset in ipairs(surviving) do
+          still = still or offset == located.offset
+        end
+        log("    after %2d checks (+%-11s): %6d survive%s", index, check.name,
+          #surviving, still and "" or "   <-- LOST THE REAL TABLE")
+      end
+
+      if #surviving > 1 then
+        local places = {}
+        for i = 1, math.min(#surviving, 6) do
+          places[#places + 1] = ("0x%06X"):format(surviving[i])
+        end
+        log("\n  still ambiguous: %s%s", table.concat(places, ", "),
+          #surviving > 6 and ", ..." or "")
+      end
+    end
+  end
+
   rom:release()
 
   local fh = io.open(report_path, "w")

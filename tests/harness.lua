@@ -18,6 +18,7 @@ local lz = require("src.rom.lz")
 local gfx = require("src.rom.gfx")
 local pics = require("src.rom.pics")
 local palettes = require("src.rom.palettes")
+local bytes = require("src.util.bytes")
 local tilesets = require("src.rom.tilesets")
 local maps = require("src.rom.maps")
 local events = require("src.rom.events")
@@ -377,6 +378,74 @@ local function test_palettes(rom, species_names)
     end
   end
   check_equal("no colour has bit 15 set", out_of_range, 0)
+
+  -- How much room the search has to be wrong.
+  --
+  -- The structural test is "251 consecutive records of four 15-bit words, not
+  -- all zero", and this file used to describe that as a signature nothing else
+  -- satisfies. It is satisfied tens of thousands of times. What that means is
+  -- that hue is carrying the entire decision, so the number of offsets hue
+  -- leaves standing is the only measure that matters -- and with the three
+  -- checks this started with, that number was 461.
+  do
+    local data = rom.data
+    local stride = palettes.RECORD_SIZE
+    local run = {}
+    for offset = rom.size - stride, 0, -1 do
+      local plausible = true
+      local any = false
+      for i = 0, palettes.COLORS_PER_RECORD - 1 do
+        local word = bytes.u16le(data, offset + i * 2)
+        if bytes.band(word, 0x8000) ~= 0 then
+          plausible = false
+          break
+        end
+        if word ~= 0 then any = true end
+      end
+      run[offset] = (plausible and any) and ((run[offset + stride] or 0) + 1) or 0
+    end
+
+    local structural = {}
+    for offset = 0, rom.size - stride do
+      if run[offset] >= 251 then
+        structural[#structural + 1] = offset
+      end
+    end
+
+    local function surviving(checks)
+      local count = 0
+      for _, offset in ipairs(structural) do
+        local ok = true
+        for species, want in pairs(checks) do
+          local word = bytes.u16le(data, offset + (species - 1) * stride)
+          if palettes.dominant(word) ~= want then
+            ok = false
+            break
+          end
+        end
+        if ok then count = count + 1 end
+      end
+      return count
+    end
+
+    local three = surviving { [1] = "g", [4] = "r", [25] = "yellow" }
+    local all = surviving(palettes.SPOT_CHECKS)
+
+    log("        %d offsets pass the structural test alone", #structural)
+    log("        %d of those survive the original three hues", three)
+    log("        %d survive all %d", all, (function()
+      local n = 0
+      for _ in pairs(palettes.SPOT_CHECKS) do n = n + 1 end
+      return n
+    end)())
+
+    -- The structural test on its own decides nothing, and saying so here is the
+    -- point: the claim it once carried was that it decided everything.
+    check("the structural test alone is not remotely sufficient",
+      #structural > 1000)
+    check("three hues were not sufficient either", three > 100)
+    check_equal("the full set leaves exactly one offset", all, 1)
+  end
 
   -- Hue spot checks against species whose colour is not in dispute.
   local expected = {
@@ -4542,7 +4611,86 @@ end
 
 --------------------------------------------------------------------------------
 
-function harness.run(rom_path, report_path)
+--- Every locator, against a cartridge that is not Gold, Silver or Crystal.
+--
+-- The README claims a dump that would decode into nonsense fails loudly. The
+-- importer does refuse a Gen 1 cartridge, but on the title string, which is the
+-- weakest check here and says nothing about the searches. This runs the
+-- searches themselves, with the version gate out of the way.
+--
+-- A Gen 1 cartridge is the right adversary rather than random noise: it carries
+-- species names in nearly the same encoding, padded to the same ten bytes, and
+-- tables of its own for moves, items and base stats. It is exactly what would
+-- decode into plausible garbage if validation were only as strong as signature.
+-- Three of the six named tables do have their signature occur in it.
+local function test_foreign(path)
+  log("\n== a cartridge that is not Gen 2 ==")
+  if not path then
+    log("  SKIP  no second cartridge given; pass one as the third argument")
+    return
+  end
+
+  local other, why = Rom.load(path)
+  if not check("the other cartridge loads", other ~= nil, why) then
+    return
+  end
+
+  local info = header.parse(other)
+  log("        %q, %d banks", info and info.title or "?", other.banks)
+
+  local names = {}
+  for key in pairs(locate.descriptors) do
+    names[#names + 1] = key
+  end
+  table.sort(names)
+
+  local matched_signature = 0
+  for _, key in ipairs(names) do
+    local result, reason = locate.table(locate.descriptors[key], other)
+    check(("%s is refused"):format(key), result == nil,
+      result and ("accepted at 0x%06X"):format(result.offset))
+    if reason and not tostring(reason):match("no candidate offset") then
+      matched_signature = matched_signature + 1
+    end
+  end
+
+  -- The interesting half. A signature that never occurs proves nothing about
+  -- the validation; a signature that *does* occur and is then thrown out is the
+  -- whole claim being tested.
+  log("        %d of %d signatures occur in it and were caught by validation",
+    matched_signature, #names)
+  check("some signatures do occur, so validation is doing the work",
+    matched_signature > 0)
+
+  -- The searches with shapes of their own. Two are not reachable at all,
+  -- because the tables they depend on did not locate, and that is part of the
+  -- answer rather than something to route around.
+  local standalone = {
+    { "pokedex", function() return require("src.rom.dex").locate(other) end },
+    { "music", function() return require("src.rom.music").locate(other) end },
+    { "tilesets", function() return tilesets.locate(other) end },
+    { "ow sprites",
+      function() return require("src.rom.ow_sprites").locate(other) end },
+    { "grass", function() return encounters.locate_grass(other) end },
+    { "water", function() return encounters.locate_water(other) end },
+    { "trainers", function() return trainers.locate(other) end },
+    { "std scripts",
+      function() return require("src.rom.std_scripts").locate(other) end },
+    { "palettes", function() return palettes.locate(other) end },
+  }
+
+  for _, entry in ipairs(standalone) do
+    local ok, result = pcall(entry[2])
+    check(("%s is refused"):format(entry[1]), ok and result == nil,
+      ok and "it accepted something" or "it crashed instead of refusing")
+  end
+
+  other:release()
+end
+
+-- @param other_rom optional second cartridge, used to check that the searches
+--        refuse a dump they were never meant to read
+function harness.run(rom_path, report_path, other_rom)
   report = {}
   passed, failed = 0, 0
 
@@ -4615,6 +4763,8 @@ function harness.run(rom_path, report_path)
     rom:release()
     test_engine()
   end
+
+  test_foreign(other_rom)
 
   log("\n== summary ==")
   log("  %d passed, %d failed", passed, failed)

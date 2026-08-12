@@ -42,6 +42,7 @@ local HEADLESS = {
   ["--probe-sav"] = "tests.probe_sav",
   ["--probe-tmhm"] = "tests.probe_tmhm",
   ["--probe-dex"] = "tests.probe_dex",
+  ["--probe-foreign"] = "tests.probe_foreign",
   ["--probe-terrain"] = "tests.probe_terrain",
   ["--probe-time"] = "tests.probe_time",
   ["--dump-tilesets"] = "tests.dump_tilesets",

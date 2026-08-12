@@ -1,7 +1,8 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 49 commits in, 649 tests passing
-and none failing. This is what a new session needs to pick the work up.
+Written at commit `6db0197` and updated since, 50 commits in, 652 tests passing
+against Crystal and none failing — 669 with a second, deliberately wrong
+cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
 `docs/architecture.md` says *why* things are the way they are, and is where the
@@ -31,8 +32,13 @@ C:\Users\yoges\Downloads\Pokémon - Crystal Version\Pokémon - Crystal Version\P
 The test wrapper, which is the command used most:
 
 ```bash
-scripts\test.ps1 -Rom "<rom path>"
+scripts\test.ps1 -Rom "<rom path>" [-Other "<a non-Gen-2 cartridge>"]
 ```
+
+`-Other` is optional and skipped when absent. Given one, the suite runs every
+locator against it and requires all of them to refuse — that is what tests the
+README's "fails loudly" claim. A Gen 1 cartridge is the useful adversary; there
+is one at `C:\Users\yoges\Downloads\Pokemon - Red Version (UE)[!] (1)\`.
 
 It needs `$env:LOVE_EXE` pointing at `love.exe`.
 
@@ -50,7 +56,7 @@ love . --shot <png> <mode>
 love . --probe-<name> <rom> <report> [extra]
 ```
 
-There are 34 probes. They are diagnostics kept from each investigation, not
+There are 35 probes. They are diagnostics kept from each investigation, not
 tests — `--probe-vm`, `--probe-channels`, `--probe-terrain` and `--probe-time`
 are the ones most likely to be useful again. `--shot <mode>` renders one frame
 of the running game and exits; the modes are listed in `main.lua` and cover
@@ -74,6 +80,10 @@ layout can be looked at rather than whichever one the demo picks.
    is a silent failure. This produced a bug that survived two fix attempts
    because the count did not move — see the interpreter section of the
    architecture notes.
+4. **`Test-Path` treats `[` and `]` as wildcards.** ROM filenames from the usual
+   dump sets are full of them — `Pokemon Red (UE)[!].gb` — so a plain
+   `Test-Path` reports a file that is plainly there as missing. `scripts\test.ps1`
+   uses `-LiteralPath` throughout. Same family as trap 1.
 
 ---
 
@@ -152,7 +162,14 @@ cross-check the extraction.
 nothing hardcodes Crystal — but **it has only ever run against Crystal**. One
 import against a Gold or Silver ROM would confirm it or find real bugs. This is
 the highest-value thing a new session could do cheaply, and it needs a ROM from
-the user.
+the user: there is no Gold or Silver image on this machine, only Crystal and a
+Gen 1 Red.
+
+The *other* half of that claim — that a dump which would decode into nonsense
+fails loudly — is now tested rather than asserted, using the Red image as an
+adversary. It found a real bug: the sprite-palette locator was accepting Red.
+That is worth knowing as a precedent. **Refusing the wrong cartridge and
+accepting the right one are different claims**, and only the first is covered.
 
 ---
 
