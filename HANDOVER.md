@@ -1,0 +1,180 @@
+# Handover
+
+Written at commit `6db0197`, 48 commits in, 587 tests passing and none failing.
+This is what a new session needs to pick the work up.
+
+`README.md` says what the project is and what state each area is in.
+`docs/architecture.md` says *why* things are the way they are, and is where the
+dead ends are recorded. Read both. This file is the working context that is not
+in either.
+
+---
+
+## Running it
+
+Nothing is on `PATH`. LÖVE lives in the scratchpad as a portable zip:
+
+```
+C:\Users\yoges\AppData\Local\Temp\claude\E--projects\<session>\scratchpad\love-11.5-win64\love.exe
+```
+
+A new session gets a **new scratchpad directory**, so LÖVE has to be downloaded
+and unzipped again. It is a portable build — unzip and run, no install.
+
+The cartridge and the save:
+
+```
+C:\Users\yoges\Downloads\Pokemon_ Crystal Version\Pokemon - Crystal Version (USA, Europe) (Rev 1).gbc
+C:\Users\yoges\Downloads\Pokémon - Crystal Version\Pokémon - Crystal Version\Pokémon - Crystal Version.sav
+```
+
+The test wrapper, which is the command used most:
+
+```bash
+scripts\test.ps1 -Rom "<rom path>"
+```
+
+It needs `$env:LOVE_EXE` pointing at `love.exe`.
+
+Everything else goes through headless entry points, because drag-and-drop
+cannot be scripted:
+
+```bash
+love . --test <rom> <report>
+love . --import <rom> <report>
+love . --shot <png> <mode>
+love . --probe-<name> <rom> <report> [extra]
+```
+
+There are 33 probes. They are diagnostics kept from each investigation, not
+tests — `--probe-vm`, `--probe-channels`, `--probe-terrain` and `--probe-time`
+are the ones most likely to be useful again. `--shot <mode>` renders one frame
+of the running game and exits; the modes are listed in `main.lua` and cover
+every feature (`grass`, `catch`, `trainer`, `mart`, `sell`, `surf`, `cut`,
+`strength`, `pc`, `boxcatch`, `exp`, `blackout`, `battleparty`, `battleheal`,
+`yesno`, `scriptbattle`, `faceleft`, and more).
+
+### Three environment traps that have cost real time
+
+1. **PowerShell `Start-Process -ArgumentList` joins array elements without
+   quoting.** A ROM path with spaces is silently truncated and the run exits 0
+   having done nothing. Every element must be quoted individually. This is why
+   `scripts\test.ps1` exists.
+2. **Lua's `io.open` goes through the Windows ANSI codepage.** A path with an
+   accent in it — which is exactly where the save lives — arrives as UTF-8 and
+   does not open. A file dropped on the window carries LÖVE's own handle and is
+   fine; naming one on the command line is not. Copy it somewhere ASCII first.
+3. **`replace_all` on a code edit matches indentation.** A partial replacement
+   is a silent failure. This produced a bug that survived two fix attempts
+   because the count did not move — see the interpreter section of the
+   architecture notes.
+
+---
+
+## The discipline
+
+This is the part worth preserving. It is not style, it is what has kept the
+project correct.
+
+**Nothing is claimed until it round-trips against content known independently
+of this code.** A table is located by searching for a signature, then accepted
+only when the whole thing decodes *and* spot checks land on records that were
+not searched for.
+
+**Two candidates means refuse, not guess.** Several locators return "validated
+at N offsets; refusing to guess" and that has caught real ambiguity.
+
+**Ask what a wrong answer would score.** This is the single most valuable habit
+here. Examples that all nearly shipped:
+
+- The hidden-item reading scored 74 of 85 — and chance was 74 of 85, because
+  87% of byte values name a real item.
+- The channel bytecode's extent measure gave 148 of 148 for a table of *zeros*.
+- A cut tree "gated a path" 62% of the time; rendering showed a wall line, and
+  a wall has floor on both sides of every cell.
+- The obstacle detector's first answer was the Pokémon Centre nurse.
+
+**Render it and look.** Bugs the tests could not see: column-major tiles, a
+missing `/` glyph, text overrunning 160px, the battle bag never being drawn, an
+Antidote healing nothing, POKéMON losing its accent. When something is on
+screen, screenshot it.
+
+**Negative results are deliverables.** The channel bytecode and the specials are
+written up with the evidence for why they are not solved, and the degeneracy of
+the vacuous metric is asserted as a *passing test* so nobody adopts it again.
+
+**pokecrystal is a reference for facts, never vendored.** Opcode numbers,
+operand widths, formula constants. Every borrowed fact is then validated against
+the cartridge. Data is still *found* by search, so Gold and Silver work from one
+code path.
+
+---
+
+## Where things stand
+
+The extraction is close to complete: species, moves, stats, learnsets,
+evolutions, sprites, palettes, tilesets, 388 maps, events, text, font,
+encounters, 541 trainers, 255 items, 34 marts, 178 item balls, 85 hidden items,
+57 machines, 59 songs, and 14558 decoded script instructions.
+
+The engine plays: overworld, warps, connections, wild and trainer battles,
+catching, experience and levelling, evolution, fainting and blackout, switching,
+the bag in and out of battle, shops, the script interpreter with yes/no prompts,
+Surf, Cut, Strength, storage boxes, the clock, and reading a real `.sav`.
+
+### What is left, and what is in the way
+
+| | state |
+|---|---|
+| Pokédex | not started; small, nothing blocking |
+| Whirlpool | the water collision value is not identified |
+| Item effects (status cures) | the effect table is not located; items with parameter 0 are refused |
+| Badges | tracked and gated, but nothing awards them |
+| Audio playback | channel bytecode unsolved; then a sound chip to write |
+| `special` routines | 127 of them, assembly, not runnable from bytecode |
+| Unown's 26 forms | pic table locator does not find them |
+
+The last four are walls, each documented with what was tried. **Do not attack
+them by guessing.** If a new session wants one of them, the honest routes are:
+an emulator to watch registers (audio, specials), or a Gold/Silver ROM to
+cross-check the extraction.
+
+### The one unverified claim
+
+`README.md` says all three games work from one code path. That is the design and
+nothing hardcodes Crystal — but **it has only ever run against Crystal**. One
+import against a Gold or Silver ROM would confirm it or find real bugs. This is
+the highest-value thing a new session could do cheaply, and it needs a ROM from
+the user.
+
+---
+
+## Deviations from the games, on purpose
+
+Each is a case where the cartridge's own logic is out of reach and a working
+feature was preferred to a faithful dead end. All are recorded in
+`docs/architecture.md`:
+
+- The **PC is on the start menu**, not a machine you stand at.
+- **Badges are not enforced**, because nothing can award them.
+- The **starting bag and ¥3000** are engine stand-ins.
+- **Blackout returns you to where the game began**, not the last Centre.
+- A **full box rolls on to the next** instead of refusing.
+- **`yesorno` answers no** when a caller resumes without answering.
+- The **font offset is the one hardcoded value**, asserted then verified.
+
+---
+
+## Working style the user asked for
+
+Keep going without stopping to check in; ask only when genuinely blocked or a
+decision is needed. Commit and push each finished piece — the remote is
+`https://github.com/Yoga07/gen2recomp.git` and pushing has standing approval.
+Write the commit message as prose explaining *why*, including what was wrong
+before. Update `README.md` (status table and test count) and
+`docs/architecture.md` in the same commit.
+
+Git on this machine: use a message file with `git commit -F`, because a
+here-string containing `&` breaks PowerShell argument parsing. `git push` writes
+progress to stderr, which PowerShell 5.1 wraps as `NativeCommandError` — the
+push succeeded if the last line shows the ref update.
