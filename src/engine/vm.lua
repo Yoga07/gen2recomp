@@ -463,6 +463,17 @@ function VM:step()
     return
   end
 
+  -- The time of day, as a mask of the three periods. Crystal's operands are
+  -- only ever 1, 2 and 4 -- single bits, never combined -- which is what says
+  -- it is a mask rather than an index.
+  if op == "checktime" then
+    self.carry = host and host.script_time_matches
+      and host:script_time_matches(instruction.args[1] or 0) or false
+    self:knowing()
+    self:advance()
+    return
+  end
+
   if op == "checkjustbattled" then
     self.carry = host and host.script_just_battled
       and host:script_just_battled() or false

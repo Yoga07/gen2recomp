@@ -926,6 +926,31 @@ both facts — who can do it, and whether the badge is held — and the caller
 currently acts on the first. The tests assert both halves separately so the
 distinction cannot blur.
 
+## The time of day
+
+Crystal is built around it. The grass tables carry three separate sets of
+encounters, and scripts branch on it.
+
+`checktime` takes one byte, and what that byte means was measured rather than
+assumed: across every reachable script the operand is only ever **1, 2 or 4** —
+single bits, never a combination. That is a mask of three periods, not an index
+and not a count.
+
+Which bit is which comes from somewhere already established. The grass tables
+store morning, day and night in that order, so the clock takes its period names
+and their order straight from `encounters.times` rather than restating them.
+There is one place the ordering lives, so the encounter tables and the script
+masks cannot drift apart.
+
+The boundaries are Gen 2's: morning from 04, day from 10, night from 18. Night
+is the one that cannot be written as a single range because it crosses
+midnight, so there is a test that 23:00 and 00:00 are the same period.
+
+The cartridge read a clock on the board; this reads the host's, which gives the
+same three-way split. The game exposes the period through one method rather than
+calling the clock directly, so forcing a time for a screenshot or a test affects
+what is in the grass as well as which way a script branches.
+
 ## The storage boxes
 
 Fourteen boxes of twenty. Nothing here is read from the cartridge: the boxes

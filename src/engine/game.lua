@@ -20,6 +20,7 @@ local events_module = require("src.rom.events")
 local experience = require("src.engine.experience")
 local learnsets = require("src.rom.learnsets")
 local storage = require("src.engine.storage")
+local clock = require("src.engine.clock")
 
 local game = {}
 game.__index = game
@@ -954,6 +955,7 @@ end
 function game:open_storage()
   local labels, choices = {}, {}
   labels[1] = ("PARTY %d"):format(#(self.party or {}))
+  -- (the boxes follow)
   choices[1] = "party"
   for _, index in ipairs(self.storage:used_boxes()) do
     labels[#labels + 1] = ("BOX %d  %d"):format(index,
@@ -1364,6 +1366,23 @@ function game:draw_menu()
     end
   end
 
+  -- The start menu carries the clock, since the time of day decides what is in
+  -- the grass and which way several scripts branch.
+  if kind == "start" then
+    local hour, minute = clock.now()
+    local label = ("%s %02d:%02d"):format(clock.label(self:time_of_day()),
+      hour, minute)
+    local box_width, box_height = 76, 20
+    local box_y = game.SCREEN_HEIGHT - box_height
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", 0, box_y, box_width, box_height)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", 2.5, box_y + 2.5,
+      box_width - 5, box_height - 5)
+    font:draw_codes(self:encode(label), 8, box_y + 6)
+    love.graphics.setColor(1, 1, 1)
+  end
+
   -- A shop counter shows what you have to spend, the way the games do.
   if kind == "mart" or kind == "sell" or kind == "mart_menu" then
     local label = ("MONEY ¥%d"):format(self.money)
@@ -1500,6 +1519,16 @@ function game:script_start_battle(spec)
   end
 
   return false
+end
+
+--- Does the current time of day satisfy a script's mask?
+function game:script_time_matches(mask)
+  return clock.matches(mask, self:time_of_day())
+end
+
+--- Which period it is. Overridable, so a test or a screenshot can pick one.
+function game:time_of_day()
+  return self.forced_time or clock.time_of_day()
 end
 
 --- Did a battle just happen, and was it won?
@@ -2320,7 +2349,9 @@ function game:update(dt)
     -- Grass rolls for an encounter, and so does bare floor in a cave.
     local terrain = self.world:terrain(self.map, cell_x, cell_y)
     if wild.rolls_here(terrain, self.map.environment) then
-      local met = wild.roll(self.map.encounters)
+      -- The time comes from the game rather than straight from the clock, so
+      -- a forced one applies to encounters as well as to scripts.
+      local met = wild.roll(self.map.encounters, self:time_of_day())
       if met then
         self:wild_encounter(met)
       end

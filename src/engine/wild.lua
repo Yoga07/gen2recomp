@@ -36,16 +36,10 @@ end
 
 --- Which encounter table applies right now.
 --
--- The real game reads the cartridge clock. Until the RTC is wired up this
--- follows the host clock, which gives the same three-way split.
+-- The clock lives in its own module now, because the scripts branch on the time
+-- as well and both have to agree about where morning ends.
 function wild.time_of_day(hour)
-  hour = hour or tonumber(os.date("%H"))
-  if hour >= 4 and hour < 10 then
-    return "morn"
-  elseif hour >= 10 and hour < 18 then
-    return "day"
-  end
-  return "nite"
+  return require("src.engine.clock").time_of_day(hour)
 end
 
 --- Roll for an encounter on a map.

@@ -64,6 +64,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** shop counters, buying and selling | working — by quantity |
 | **Engine:** start menu, party list, summary | working |
 | **Engine:** storage boxes | working — 14 boxes of 20 |
+| **Engine:** day/night clock | working — encounters and scripts |
 | Music table | located — 59 songs, 148 channels |
 | Channel bytecode | not solved — see the negative result in docs |
 | Audio playback | not started — needs a Game Boy sound chip |
@@ -92,7 +93,7 @@ Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-565 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+587 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`. Nothing is claimed to be correct
 until it round-trips against content known independently of this code.
 

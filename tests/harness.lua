@@ -2269,6 +2269,74 @@ local function test_fainting(base_stats)
     against.battle.over == false)
 end
 
+-- The time of day.
+local function test_clock()
+  log("\n== clock ==")
+
+  local clock = require("src.engine.clock")
+  local encounters_module = require("src.rom.encounters")
+  local vm = require("src.engine.vm")
+
+  -- One source for the ordering: the encounter tables' own three slots.
+  check_equal("the periods are the encounter tables' periods",
+    table.concat(clock.TIMES, ","),
+    table.concat(encounters_module.times, ","))
+  check_equal("and there are three", #clock.TIMES, 3)
+
+  -- Gen 2's boundaries, checked on both sides of each.
+  local expected = {
+    [0] = "nite", [3] = "nite", [4] = "morn", [9] = "morn",
+    [10] = "day", [17] = "day", [18] = "nite", [23] = "nite",
+  }
+  for hour, wanted in pairs(expected) do
+    check_equal(("%02d:00 is %s"):format(hour, wanted),
+      clock.time_of_day(hour), wanted)
+  end
+
+  -- Night is the one that wraps midnight, so it has to be the same period on
+  -- both sides of it.
+  check_equal("night runs across midnight", clock.time_of_day(23),
+    clock.time_of_day(0))
+
+  -- The mask. Crystal only ever uses 1, 2 and 4, which is what says the bits
+  -- are one per period rather than an index.
+  check_equal("morning is bit zero", clock.mask_for("morn"), 1)
+  check_equal("day is bit one", clock.mask_for("day"), 2)
+  check_equal("night is bit two", clock.mask_for("nite"), 4)
+  check_equal("something that is not a period has no bit",
+    clock.mask_for("teatime"), 0)
+
+  check("a mask of one matches the morning", clock.matches(1, "morn"))
+  check("and not the day", not clock.matches(1, "day"))
+  check("a combined mask matches both its periods",
+    clock.matches(5, "morn") and clock.matches(5, "nite"))
+  check("and not the one it leaves out", not clock.matches(5, "day"))
+
+  -- checktime in the interpreter, asked of a host that is always at night.
+  local host = {
+    script_time_matches = function(_, mask)
+      return clock.matches(mask, "nite")
+    end,
+  }
+  local function ran(mask)
+    local machine = vm.new(host, {
+      [1] = {
+        [0x4000] = { op = "checktime", opcode = 0x2B, size = 2,
+                     args = { mask } },
+        [0x4002] = { op = "end", opcode = 0x91, size = 1, args = {},
+                     ends = true },
+      },
+    })
+    machine:start(1, 0x4000)
+    machine:resume()
+    return machine.carry
+  end
+
+  check("checktime for night is true at night", ran(4) == true)
+  check("and false for the morning", ran(1) == false)
+  check("a mask covering everything is always true", ran(7) == true)
+end
+
 -- The storage boxes.
 local function test_storage(base_stats)
   log("\n== storage ==")
@@ -4211,6 +4279,7 @@ function harness.run(rom_path, report_path)
     test_text_codes()
     test_experience(rom, found and found.base_stats and found.base_stats.records)
     test_fainting(found and found.base_stats and found.base_stats.records)
+    test_clock()
     test_storage(found and found.base_stats and found.base_stats.records)
     test_obstacles(rom, map_result)
     test_machines(rom,
