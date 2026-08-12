@@ -1,10 +1,11 @@
 -- Saved games.
 --
 -- This is the engine's own state, not the cartridge's SRAM layout. Emulating
--- SRAM would mean building a format for data the engine does not have yet —
--- boxes, badges, money, the Pokédex — and would tie the save to Crystal's
--- structure before there is anything to put in it. Reading a real .sav so a
--- player can import their own progress is a worthwhile separate feature.
+-- SRAM would mean tying the save to Crystal's structure before there was
+-- anything to put in it — boxes, badges, money and the dex all arrived later,
+-- and each was added here as a field rather than as a bit in someone else's
+-- layout. Reading a real .sav so a player can import their own progress is a
+-- worthwhile separate feature and is one.
 --
 -- Saves live beside the cache but are not part of it: the cache is derived from
 -- a cartridge and can be rebuilt at any time by re-importing, while a save is
@@ -143,6 +144,16 @@ function save.write(game, state)
       end
       return out
     end)(),
+    -- The Pokédex, as two lists of species numbers. Same reasoning as the
+    -- beaten trainers: sparse numeric keys round-trip more predictably as
+    -- lists than as a table with holes in it.
+    dex = (function()
+      if not state.dex then
+        return nil
+      end
+      local seen, caught = state.dex:to_lists()
+      return { seen = seen, caught = caught }
+    end)(),
     saved_at = os.time(),
   }
 
@@ -226,6 +237,9 @@ function save.read(game, base_stats)
       end
       return out
     end)(),
+    -- Passed through as the two lists. Turning them back into a dex needs to
+    -- know how many species this cache has, which is the caller's business.
+    dex = record.dex,
     saved_at = record.saved_at,
   }
 end

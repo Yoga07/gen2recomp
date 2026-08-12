@@ -9,7 +9,11 @@
 local cache = {}
 
 -- Bump whenever the on-disk layout or any decoder's output changes shape.
-cache.FORMAT_VERSION = 1
+--
+-- 2 adds the Pokédex entries. A cache written before them would load and run,
+-- with an empty dex and no sign of why, which is exactly the half-read state
+-- this number exists to prevent.
+cache.FORMAT_VERSION = 2
 
 local ROOT = "cache"
 

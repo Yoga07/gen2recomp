@@ -2411,6 +2411,317 @@ local function test_storage(base_stats)
   check_equal("at the right level", restored:box(5)[1].level, 70)
 end
 
+-- The Pokédex entries: classification, height, weight and description.
+--
+-- The table is found by shape alone -- there is no first record to encode as a
+-- signature, because a classification is just a word -- so most of what follows
+-- is about how much the shape is really doing and what a wrong answer would
+-- have scored.
+local function test_dex(rom, species_names)
+  log("\n== pokedex entries ==")
+
+  local dex_rom = require("src.rom.dex")
+
+  local result, why = dex_rom.locate(rom)
+  if not check("the Pokédex entries were located", result ~= nil, why) then
+    return
+  end
+
+  log("        %d entries, pointer table at 0x%06X", #result.entries,
+    result.offset)
+  check_equal("one entry per species", #result.entries, dex_rom.SPECIES_COUNT)
+
+  -- The shape finds exactly as many records as there are species, and it was
+  -- never told how many to look for. Anything else in the cartridge that
+  -- happened to match would push this number up.
+  check_equal("the shape finds no more records than there are species",
+    result.found, dex_rom.SPECIES_COUNT)
+
+  -- What would a wrong answer have scored? The one constraint on the four
+  -- bytes that is arithmetic rather than "looks like text" is that a height in
+  -- feet and inches cannot carry a twelfth inch. Dropping it and rescanning
+  -- says how much work it does.
+  local loose = 0
+  do
+    local data = rom.data
+    local offset = 0
+    while offset < #data - 16 do
+      local first = string.byte(data, offset + 1)
+      local hit = nil
+      if first and first >= 0x80 and first <= 0x99 then
+        local class, terminator = dex_rom.read_class(data, offset)
+        if class then
+          local cursor, ok = terminator + 5, true
+          for index = 1, dex_rom.PAGES do
+            local lines, consumed = dex_rom.read_page(data, cursor,
+              index == 1 and 12 or 1)
+            if not lines then
+              ok = false
+              break
+            end
+            cursor = cursor + consumed
+          end
+          if ok then
+            hit = cursor
+          end
+        end
+      end
+      if hit then
+        loose = loose + 1
+        offset = hit
+      else
+        offset = offset + 1
+      end
+    end
+  end
+  log("        the same shape without the feet-and-inches check: %d records",
+    loose)
+  check("the feet-and-inches check is doing real work",
+    loose > dex_rom.SPECIES_COUNT)
+
+  -- One long run of pointers is only evidence beside how long the others get.
+  log("        longest pointer run %d, next longest %d",
+    dex_rom.SPECIES_COUNT, result.runner_up)
+  check("no other run of pointers comes close", result.runner_up < 20)
+
+  -- The bank split fell out of the search rather than being asked for: the
+  -- cartridge stores its dex text in runs by species range, and a shape search
+  -- that knew nothing about banks reproduced them.
+  local counts = {}
+  for _, bank in ipairs(result.bank_order) do
+    counts[#counts + 1] = ("$%02X x%d"):format(bank, result.banks[bank])
+  end
+  log("        banks: %s", table.concat(counts, ", "))
+  check_equal("the entries fall into four bank runs", #result.bank_order, 4)
+
+  -- Every record decodes, and every height reads as feet and inches.
+  local bad_inches, classless, short_pages, letters = 0, 0, 0, 0
+  for _, entry in ipairs(result.entries) do
+    if entry.height % 100 >= 12 then
+      bad_inches = bad_inches + 1
+    end
+    if not entry.class or entry.class == "" then
+      classless = classless + 1
+    end
+    if #entry.pages ~= dex_rom.PAGES then
+      short_pages = short_pages + 1
+    end
+    for _, page in ipairs(entry.pages) do
+      for _, line in ipairs(page) do
+        letters = letters + #line.codes
+      end
+    end
+  end
+  check_equal("no height carries a twelfth inch", bad_inches, 0)
+  check_equal("every species is classified", classless, 0)
+  check_equal("every description has two pages", short_pages, 0)
+  log("        %d characters of description across the dex", letters)
+  -- A per-species floor rather than a total, which a handful of long entries
+  -- could carry on their own. Two pages of three lines is around ninety
+  -- characters; thirty is well below anything real and well above a stray
+  -- match.
+  local thin, thinnest = 0, math.huge
+  for _, entry in ipairs(result.entries) do
+    local count = 0
+    for _, page in ipairs(entry.pages) do
+      for _, line in ipairs(page) do
+        count = count + #line.codes
+      end
+    end
+    if count < 30 then
+      thin = thin + 1
+    end
+    thinnest = math.min(thinnest, count)
+  end
+  log("        the shortest description is %d characters", thinnest)
+  check_equal("every species has a real description", thin, 0)
+
+  -- Spot checks. None of these took any part in finding the table, and the
+  -- measurements are the same in Gold and Silver, so they are the same kind of
+  -- external fact as "species 1 is BULBASAUR".
+  local first = result.entries[1]
+  check_equal("species 1 is the SEED POKéMON", first.class, "SEED")
+  check_equal("and stands 2'04\"", dex_rom.height_text(first.height), "2'04")
+  check_equal("and weighs 15.0lb", dex_rom.weight_text(first.weight), "15.0lb")
+
+  check_equal("species 25 is the MOUSE POKéMON", result.entries[25].class,
+    "MOUSE")
+  check_equal("species 143 is the heaviest thing in the dex",
+    dex_rom.weight_text(result.entries[143].weight), "1014.0lb")
+  check_equal("species 251 is the TIMETRAVEL POKéMON",
+    result.entries[251].class, "TIMETRAVEL")
+
+  -- Steelix is the tallest, and its height is the one that most nearly breaks
+  -- the two-digit inch rule the search leans on.
+  local tallest, tallest_at = 0, nil
+  for index, entry in ipairs(result.entries) do
+    if entry.height > tallest then
+      tallest, tallest_at = entry.height, index
+    end
+  end
+  log("        tallest is species %d at %s", tallest_at,
+    dex_rom.height_text(tallest))
+  check("the tallest is still inside the ceiling the search allows",
+    tallest < dex_rom.HEIGHT_MAX)
+
+  -- No line may overrun the screen. The canvas is 160 wide, the text starts at
+  -- x=4 and a glyph is 8 across, so 19 characters is the ceiling: the widest
+  -- line, "LITTLE BIRD POKéMON", lands on 156 against the border at 157.
+  -- Text running off the right edge is a bug this project has shipped before
+  -- and only caught by looking at it; this catches it without looking.
+  local longest, longest_text = 0, ""
+  for _, entry in ipairs(result.entries) do
+    for _, page in ipairs(entry.pages) do
+      for _, line in ipairs(page) do
+        if #line.codes > longest then
+          longest, longest_text = #line.codes, line.text
+        end
+      end
+    end
+  end
+  log("        the longest line is %d glyphs: %q", longest, longest_text)
+  check("every description line fits the screen", longest <= 19)
+
+  -- And the classification, which is drawn with " POKéMON" after it.
+  local longest_class, class_text = 0, ""
+  for _, entry in ipairs(result.entries) do
+    if #entry.class > longest_class then
+      longest_class, class_text = #entry.class, entry.class
+    end
+  end
+  log("        the longest classification is %q", class_text)
+  check("the longest classification still fits beside POKéMON",
+    longest_class + 8 <= 19)
+
+  -- The second page is where a one-page reading would have silently stopped,
+  -- so it gets a content check of its own rather than only a count. This is
+  -- Bulbasaur's, read off the cartridge before any of this code existed.
+  local second = first.pages[2]
+  check_equal("the second page has three lines", #second, 3)
+  check_equal("and reads on from the first", second[1].text, "stored in the")
+  check_equal("through its second line", second[2].text, "seeds on its back")
+  check_equal("to its last", second[3].text, "in order to grow.")
+
+  -- The line codes are what the font actually draws, and they have to agree
+  -- with the text rather than being a parallel decoding that could drift.
+  check_equal("the codes match the text they were read from",
+    #second[1].codes, #second[1].text)
+
+  if species_names then
+    local entry = result.entries[1]
+    log("        %s, the %s POKéMON: %s", species_names[1], entry.class,
+      entry.pages[1][1].text)
+    log("        page 2: %s / %s / %s", second[1].text, second[2].text,
+      second[3].text)
+  end
+end
+
+--- Which species have been seen and which have been caught.
+local function test_dex_tracking(base_stats)
+  log("\n== pokedex tracking ==")
+
+  local dex = require("src.engine.dex")
+
+  local book = dex.new(251)
+  check_equal("a new dex has seen nothing", book:seen_count(), 0)
+  check_equal("and caught nothing", book:caught_count(), 0)
+
+  check("seeing one is news the first time", book:see(19))
+  check("but not the second", book:see(19) == false)
+  check("it is seen", book:is_seen(19))
+  check("and not caught", book:is_caught(19) == false)
+  check_equal("one sighting", book:seen_count(), 1)
+
+  -- The implication that stops eight call sites having to remember it.
+  check("catching one that was never seen is news", book:catch(25))
+  check("and it counts as seen too", book:is_seen(25))
+  check_equal("two sightings now", book:seen_count(), 2)
+  check_equal("and one catch", book:caught_count(), 1)
+
+  -- Out of range is refused rather than quietly stored, which would put a
+  -- species 0 or a species 999 in the counts.
+  check("species 0 is refused", book:see(0) == false)
+  check("as is one past the end", book:see(252) == false)
+  check("and something that is not a number", book:see("25") == false)
+  check_equal("none of which changed the count", book:seen_count(), 2)
+
+  check_equal("the first one seen is the lowest numbered", book:first_seen(1), 19)
+  check_equal("looking from past it finds the next", book:first_seen(20), 25)
+  check("looking past everything finds nothing",
+    book:first_seen(200) == nil)
+
+  -- Round trip through the two lists a save holds. The two states have to stay
+  -- apart across it: one species seen, the other seen and caught.
+  local seen, caught = book:to_lists()
+  check_equal("two species go into the save", #seen, 2)
+  check_equal("one of them caught", #caught, 1)
+  local restored = dex.from_lists(251, seen, caught)
+  check_equal("the sightings come back", restored:seen_count(), 2)
+  check_equal("and the catches", restored:caught_count(), 1)
+  check("the right one is caught", restored:is_caught(25))
+  check("and the other only seen", restored:is_caught(19) == false)
+
+  -- Catching one already seen is news, but not a second sighting.
+  check("catching one already seen is still news", book:catch(19))
+  check_equal("without adding a sighting", book:seen_count(), 2)
+  check_equal("and now both are owned", book:caught_count(), 2)
+
+  -- And through a real save file, not just the two lists. The dex goes in as
+  -- an object and comes back as data, so the two halves have to agree about
+  -- the shape between them.
+  local save = require("src.engine.save")
+  local game_id = "harness_dex_test"
+  local written, why = save.write(game_id, { party = {}, dex = book })
+  if check("a save carrying a dex is written", written, why) then
+    local state = save.read(game_id, base_stats)
+    if check("and read back", state ~= nil) then
+      local back = dex.from_lists(251, state.dex.seen, state.dex.caught)
+      check_equal("the sightings survive the file", back:seen_count(), 2)
+      check_equal("and the catches", back:caught_count(), 2)
+      check("naming the same species", back:is_caught(19) and back:is_caught(25))
+    end
+    save.remove(game_id)
+  end
+
+  if not base_stats then
+    return
+  end
+
+  -- The engine's own hooks. Anything reaching the party is owned, and an
+  -- evolution is a species nothing else would register: it never passes back
+  -- through add_to_party.
+  local game = require("src.engine.game")
+  local pokemon = require("src.engine.pokemon")
+
+  local instance = setmetatable({
+    dex = dex.new(251),
+    party = {},
+    base_stats = base_stats,
+  }, game)
+
+  instance:add_to_party(pokemon.new(25, base_stats[25], { level = 5 }))
+  check("joining the party registers a catch", instance.dex:is_caught(25))
+
+  -- The description turns over rather than scrolling, because that is the shape
+  -- the cartridge stores it in. Two pages, and it wraps at both ends.
+  instance.dex_entries = { [25] = { pages = { {}, {} } } }
+  instance.ui = { kind = "dex_entry", species = 25, page = 1 }
+  instance:dex_entry_page(1)
+  check_equal("right turns to the second page", instance.ui.page, 2)
+  instance:dex_entry_page(1)
+  check_equal("and wraps back to the first", instance.ui.page, 1)
+  instance:dex_entry_page(-1)
+  check_equal("left from the first wraps to the last", instance.ui.page, 2)
+
+  local subject = pokemon.new(1, base_stats[1], { level = 15 })
+  pokemon.evolve(subject, 2, base_stats[2])
+  instance.dex:catch(subject.species)
+  check("and what it evolves into is a catch of its own",
+    instance.dex:is_caught(2))
+  check_equal("which is two species owned from one caught",
+    instance.dex:caught_count(), 2)
+end
+
 -- What the field moves clear away.
 local function test_obstacles(rom, map_result)
   log("\n== obstacles ==")
@@ -4281,6 +4592,8 @@ function harness.run(rom_path, report_path)
     test_fainting(found and found.base_stats and found.base_stats.records)
     test_clock()
     test_storage(found and found.base_stats and found.base_stats.records)
+    test_dex(rom, found and found.species_names and found.species_names.records)
+    test_dex_tracking(found and found.base_stats and found.base_stats.records)
     test_obstacles(rom, map_result)
     test_machines(rom,
       found and found.move_names and found.move_names.records,

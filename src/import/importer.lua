@@ -26,6 +26,7 @@ local music = require("src.rom.music")
 local machines = require("src.rom.machines")
 local obstacles = require("src.rom.obstacles")
 local learnsets = require("src.rom.learnsets")
+local dex = require("src.rom.dex")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -323,6 +324,27 @@ function importer.run(path, progress)
       cache.write(descriptor.game, "machines", machine_result.moves)
       cache.write(descriptor.game, "hm_moves", machine_result.hm)
     end
+  end
+
+  -- The Pokédex entries: classification, height, weight and the description.
+  -- Independent of everything above -- the search is on shape alone, so this
+  -- does not wait on the species names or anything else having been found.
+  local dex_summary = { count = 0 }
+  step("locating the Pokédex entries")
+  local dex_result, dex_err = dex.locate(rom)
+  if not dex_result then
+    failed.dex = dex_err
+  else
+    offsets.dex = dex_result.offset
+    dex_summary.count = #dex_result.entries
+    dex_summary.found = dex_result.found
+    dex_summary.runner_up = dex_result.runner_up
+    dex_summary.banks = dex_result.bank_order
+    local records = {}
+    for index, entry in ipairs(dex_result.entries) do
+      records[index] = dex.to_record(entry)
+    end
+    cache.write(descriptor.game, "dex_entries", records)
   end
 
   -- The music table. Read, not played: sound would need the channel command
@@ -690,6 +712,7 @@ function importer.run(path, progress)
     marts = mart_summary,
     music = music_summary,
     machines = machine_summary,
+    dex = dex_summary,
     script_code = script_summary,
     sha1 = sha1,
   }
@@ -772,6 +795,18 @@ function importer.format_report(report)
   if report.machines and report.machines.count > 0 then
     lines[#lines + 1] = ("  %-16s %4d TMs and HMs")
       :format("machines", report.machines.count)
+  end
+
+  if report.dex and report.dex.count > 0 then
+    lines[#lines + 1] = ("  %-16s %4d entries across banks %s")
+      :format("pokedex", report.dex.count,
+        (function()
+          local names = {}
+          for _, bank in ipairs(report.dex.banks or {}) do
+            names[#names + 1] = ("$%02X"):format(bank)
+          end
+          return table.concat(names, ", ")
+        end)())
   end
 
   if report.music and report.music.count > 0 then

@@ -80,6 +80,18 @@ function Storage:withdraw(box_index, slot)
   return table.remove(box, slot)
 end
 
+--- Everything stored, flattened. The dex asks this on load: a Pokémon in a box
+--- is one the player owns, whichever box it happens to be sitting in.
+function Storage:every()
+  local out = {}
+  for _, box in ipairs(self.boxes) do
+    for _, instance in ipairs(box) do
+      out[#out + 1] = instance
+    end
+  end
+  return out
+end
+
 --- Which boxes have anything in them.
 function Storage:used_boxes()
   local out = {}

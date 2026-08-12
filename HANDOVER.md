@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197`, 48 commits in, 587 tests passing and none failing.
-This is what a new session needs to pick the work up.
+Written at commit `6db0197` and updated since, 49 commits in, 649 tests passing
+and none failing. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
 `docs/architecture.md` says *why* things are the way they are, and is where the
@@ -36,6 +36,10 @@ scripts\test.ps1 -Rom "<rom path>"
 
 It needs `$env:LOVE_EXE` pointing at `love.exe`.
 
+`cache.FORMAT_VERSION` is 2 as of the Pokédex. A cache written by an earlier
+build is reported as stale and has to be re-imported rather than half-read, so
+the first thing a new session does after checking out is usually `--import`.
+
 Everything else goes through headless entry points, because drag-and-drop
 cannot be scripted:
 
@@ -46,13 +50,15 @@ love . --shot <png> <mode>
 love . --probe-<name> <rom> <report> [extra]
 ```
 
-There are 33 probes. They are diagnostics kept from each investigation, not
+There are 34 probes. They are diagnostics kept from each investigation, not
 tests — `--probe-vm`, `--probe-channels`, `--probe-terrain` and `--probe-time`
 are the ones most likely to be useful again. `--shot <mode>` renders one frame
 of the running game and exits; the modes are listed in `main.lua` and cover
 every feature (`grass`, `catch`, `trainer`, `mart`, `sell`, `surf`, `cut`,
 `strength`, `pc`, `boxcatch`, `exp`, `blackout`, `battleparty`, `battleheal`,
-`yesno`, `scriptbattle`, `faceleft`, and more).
+`yesno`, `scriptbattle`, `faceleft`, `dex`, `dexentry`, and more). `dexentry`
+takes an optional species number as a fourth argument, so a particular entry's
+layout can be looked at rather than whichever one the demo picks.
 
 ### Three environment traps that have cost real time
 
@@ -115,18 +121,19 @@ code path.
 The extraction is close to complete: species, moves, stats, learnsets,
 evolutions, sprites, palettes, tilesets, 388 maps, events, text, font,
 encounters, 541 trainers, 255 items, 34 marts, 178 item balls, 85 hidden items,
-57 machines, 59 songs, and 14558 decoded script instructions.
+57 machines, 59 songs, 251 Pokédex entries, and 14558 decoded script
+instructions.
 
 The engine plays: overworld, warps, connections, wild and trainer battles,
 catching, experience and levelling, evolution, fainting and blackout, switching,
 the bag in and out of battle, shops, the script interpreter with yes/no prompts,
-Surf, Cut, Strength, storage boxes, the clock, and reading a real `.sav`.
+Surf, Cut, Strength, storage boxes, the clock, the Pokédex, and reading a real
+`.sav`.
 
 ### What is left, and what is in the way
 
 | | state |
 |---|---|
-| Pokédex | not started; small, nothing blocking |
 | Whirlpool | the water collision value is not identified |
 | Item effects (status cures) | the effect table is not located; items with parameter 0 are refused |
 | Badges | tracked and gated, but nothing awards them |
@@ -162,6 +169,8 @@ feature was preferred to a faithful dead end. All are recorded in
 - A **full box rolls on to the next** instead of refusing.
 - **`yesorno` answers no** when a caller resumes without answering.
 - The **font offset is the one hardcoded value**, asserted then verified.
+- The **dex prints no inch mark**, because the height is formatted in assembly
+  and no dex text contains one to read the glyph off.
 
 ---
 

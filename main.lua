@@ -41,6 +41,7 @@ local HEADLESS = {
   ["--probe-channels"] = "tests.probe_channels",
   ["--probe-sav"] = "tests.probe_sav",
   ["--probe-tmhm"] = "tests.probe_tmhm",
+  ["--probe-dex"] = "tests.probe_dex",
   ["--probe-terrain"] = "tests.probe_terrain",
   ["--probe-time"] = "tests.probe_time",
   ["--dump-tilesets"] = "tests.dump_tilesets",
@@ -169,8 +170,12 @@ function love.load(args)
           or args[i + 2] == "cut" or args[i + 2] == "nocut"
           or args[i + 2] == "strength"
           or args[i + 2] == "faceleft"
+          or args[i + 2] == "dex" or args[i + 2] == "dexentry"
           or args[i + 2] == "faceright")
           and args[i + 2] or nil,
+        -- An optional fourth argument, so a dex shot can be pointed at a
+        -- particular species rather than whatever the demo happens to pick.
+        species = tonumber(args[i + 3]),
         frames = 2,
       }
     end
@@ -226,6 +231,10 @@ function love.load(args)
       state.game:show_trainer_demo()
     elseif state.shot and state.shot.sign == "connection" then
       state.game:show_connection_demo()
+    elseif state.shot and (state.shot.sign == "dex"
+      or state.shot.sign == "dexentry") then
+      state.game:show_dex_demo(state.shot.sign == "dexentry" and "entry" or nil,
+        state.shot.species)
     elseif state.shot and state.shot.sign == "party" then
       state.game:show_party_demo()
     elseif state.shot and state.shot.sign == "menu" then

@@ -1398,6 +1398,123 @@ carry a `$00` in a position the decoder treats as "this is not dialogue", and
 relaxing that check to win six blocks would weaken a test the whole locator
 leans on.
 
+## The Pokédex, and a table with nothing to search for
+
+Every other table in this project is found by encoding its first record as a
+signature. Species 1 is BULBASAUR, move 1 is POUND, item 1 is the MASTER BALL.
+A Pokédex entry has no such handle: its first field is a classification, and a
+classification is just a word.
+
+So the search is on shape, and the shape had to be read off the cartridge rather
+than guessed at. The first guess — a word, some bytes, then a description —
+found **nothing at any gap from zero to eight**, which was at least a loud
+failure rather than a plausible one. Dumping the bytes around a classification
+the dex is known to contain gave the record immediately:
+
+```
+SEED@  CC 00  96 00  While it is young,<4E>it uses the<4E>nutrients that are@
+                     stored in the<4E>seeds on its back<4E>in order to grow.@
+```
+
+Two things about the encoding are why the first attempt found nothing, and both
+are the kind of difference that produces zero results rather than wrong ones.
+**The line break inside a dex entry is `$4E`**, not the `$4F` a text box uses.
+And **`$50` is a page break as well as the terminator**, so a record ends on the
+*second* one. A decoder written for dialogue stops at the first page and then
+fails to find anything after it.
+
+`$CC` is 204, which reads as 2'04"; `$96` is 150, which reads as 15.0lb. Those
+are Bulbasaur's, and neither took any part in finding the table.
+
+### The one sharp constraint is arithmetic, not textual
+
+Everything else about the shape is "looks like text", which is weak. What is not
+weak is that **a height in feet and inches cannot carry a twelfth inch**.
+
+That single check is what makes the count land. Scanning the whole cartridge for
+the shape finds **exactly 251 records** — the species count, arrived at from the
+other end and never told to the search. Dropping the feet-and-inches check and
+scanning again finds **288**. So the constraint is doing real work, and the
+count with it in place is not something the rest of the shape would have reached
+on its own.
+
+The page count was measured the same way rather than assumed:
+
+| pages per record | records found | of them back to back |
+|---|---|---|
+| 1 | 251 | **0** |
+| **2** | **251** | **247** |
+| 3 | 125 | 0 |
+| 4 | 0 | 0 |
+
+One page finds the same 251 records and puts *none* of them adjacent, which is
+what a half-read record looks like. Two puts 247 of 251 back to back, and the
+four breaks are not failures — they are the four places the table changes bank.
+
+### The bank split fell out rather than being asked for
+
+The 251 records land in four runs of **64, 64, 64 and 59**, in banks `$60`,
+`$6E`, `$73` and `$74`. That is the cartridge storing its dex text by species
+range, and the search knew nothing whatever about banks. A shape search
+reproducing the game's own partitioning is a stronger result than the count on
+its own.
+
+### Order comes from a pointer table, and the margin is the evidence
+
+The records are in dex order but nothing in a record says which species it
+belongs to, so the order comes from a run of near pointers landing on them and
+on nothing else — the same lever that settled the marts. The longest such run in
+the cartridge is **251 long. The next longest is 6.** That is not a margin noise
+produces, and the run ends of its own accord at exactly 251 rather than needing
+to be cut off.
+
+A near pointer carries no bank, so 13 of the 251 name an address that two
+different banks both hold a record at. Rather than assume the obvious tiebreak,
+the resolution is required to be **unique**: the lowest monotone assignment and
+the highest monotone assignment are both computed, and the answer is accepted
+only where they agree. Two different assignments would mean the constraint is
+weaker than it looks, which is a refusal rather than a coin toss. They agree
+everywhere, and as a separate check, address order reproduces pointer order at
+all **238** of the pointers that were never ambiguous in the first place.
+
+### The inch mark is not identified, and is left off
+
+The dex prints a height as feet and inches. The feet mark is the apostrophe at
+`$E0`, which the font settled long ago. The inch mark is missing, and that is a
+gap rather than a style choice.
+
+The reason is structural, and it is the same reason the specials are out of
+reach: **the height is stored as a number and formatted by the game's own
+assembly**, so there is no dex text anywhere in the cartridge containing an inch
+mark to read the code off. Printing the unmapped tiles below the letters — the
+method that settled `$75` as a control rather than a letter — turns up several
+marks that could plausibly be one and nothing that decides between them.
+
+A guessed glyph would be a wrong character on screen for the sake of appearing
+complete. `HT 2'04` carries the meaning without one.
+
+### Seen and caught are two sets, and eight places write to them
+
+The dex tracks two states, not one field with three values, because they are
+recorded at different moments: a species is seen the instant it appears on the
+far side of a battle, and caught only when it ends up in the player's hands.
+
+Catching implies seeing, and that implication lives in `dex:catch` rather than
+at each of the eight call sites — a wild encounter, both trainer paths, the
+starter, a thrown ball, anything joining the party, an evolution, and a party
+imported from a real cartridge save. Any of those could have registered a catch
+and forgotten the sighting.
+
+Two of them are worth naming. **A catch is registered before the caught Pokémon
+is put anywhere**, because a catch made with a full party and full boxes is
+still a catch and the dex should say so. And **an evolution registers the
+species it became**, because nothing else would: an evolution never passes back
+through the code that adds to the party.
+
+A save written before any of this existed still shows what the player owns,
+because loading registers the party and the boxes as caught regardless of what
+the save's dex field says.
+
 ## Hidden items, and measuring what chance looks like
 
 Background event type 7 is a hidden item. A background event is y, x, type, then

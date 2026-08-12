@@ -171,6 +171,42 @@ text.controls = {
   [text.TERMINATOR] = "done",
 }
 
+--- Which character codes the font should draw for one source byte.
+--
+-- Usually itself. A substitution has no glyph of its own — it stands for a word
+-- the text engine expands at display time — so it is spelled out as the codes of
+-- the characters it expands to. "é" is two bytes in UTF-8 and is a glyph in its
+-- own right, so it has to be matched before the byte-at-a-time walk: doing that
+-- walk first drops it, and "POKéMON" reaches the font as "POKMON".
+-- @return array of codes, empty when the byte draws nothing
+function text.glyph_codes(code)
+  if charmap[code] then
+    return { code }
+  end
+
+  local glyph = text.substitutions[code]
+  if not glyph then
+    return {}
+  end
+
+  local codes, i = {}, 1
+  while i <= #glyph do
+    if glyph:byte(i) == 0xC3 and glyph:byte(i + 1) == 0xA9 then
+      codes[#codes + 1] = 0xEA
+      i = i + 2
+    else
+      local letter = glyph:sub(i, i):upper()
+      if letter >= "A" and letter <= "Z" then
+        codes[#codes + 1] = 0x80 + letter:byte() - 65
+      elseif letter == " " then
+        codes[#codes + 1] = 0x7F
+      end
+      i = i + 1
+    end
+  end
+  return codes
+end
+
 --- Decode a dialogue block into pages of lines.
 --
 -- A page is what fits in the text box at once; a paragraph control starts a new
@@ -261,28 +297,8 @@ function text.decode_dialogue(data, offset, max_bytes)
       -- Substitutions have no single glyph to draw, so their codes are spelled
       -- out as the characters of the placeholder. The engine draws what it is
       -- given; resolving these to real names is the save file's job.
-      if charmap[code] then
-        current_codes[#current_codes + 1] = code
-      else
-        local i = 1
-        while i <= #glyph do
-          -- "é" is two bytes in UTF-8 and is a glyph in its own right. Walking
-          -- this a byte at a time and keeping only A to Z dropped it, so
-          -- "POKéMON" reached the font as "POKMON".
-          if glyph:byte(i) == 0xC3 and glyph:byte(i + 1) == 0xA9 then
-            current_codes[#current_codes + 1] = 0xEA
-            i = i + 2
-          else
-            local letter = glyph:sub(i, i):upper()
-            local byte_value = letter:byte()
-            if letter >= "A" and letter <= "Z" then
-              current_codes[#current_codes + 1] = 0x80 + byte_value - 65
-            elseif letter == " " then
-              current_codes[#current_codes + 1] = 0x7F
-            end
-            i = i + 1
-          end
-        end
+      for _, drawn in ipairs(text.glyph_codes(code)) do
+        current_codes[#current_codes + 1] = drawn
       end
       letters = letters + 1
     end

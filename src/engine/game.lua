@@ -21,6 +21,8 @@ local experience = require("src.engine.experience")
 local learnsets = require("src.rom.learnsets")
 local storage = require("src.engine.storage")
 local clock = require("src.engine.clock")
+local dex = require("src.engine.dex")
+local dex_rom = require("src.rom.dex")
 
 local game = {}
 game.__index = game
@@ -79,6 +81,9 @@ function game.new(game_id, start_index)
   -- Which sprites are the cut tree and the boulder, found at import.
   instance.obstacles = cache.read(game_id, "obstacles") or {}
   instance.storage = storage.new()
+  -- What the dex says about each species, and what this player has met of them.
+  instance.dex_entries = cache.read(game_id, "dex_entries") or {}
+  instance.dex = dex.new(#(instance.species_names or {}))
   instance.badges = {}
   instance.surfing = false
   instance.std_scripts = cache.read(game_id, "std_scripts")
@@ -132,6 +137,10 @@ function game:import_sav(path)
   end
 
   self.party = sav.to_party(members, self.base_stats, self.learnset_records)
+  -- A party imported from a cartridge is one the player owns, so it counts.
+  for _, member in ipairs(self.party) do
+    self:pokedex():catch(member.species)
+  end
   self:notify(("Loaded %d from the cartridge save."):format(#self.party))
   return #self.party
 end
@@ -152,6 +161,7 @@ function game:save()
     money = self.money,
     storage = self.storage,
     script_flags = self.script_flags,
+    dex = self:pokedex(),
   })
 
   if ok then
@@ -187,6 +197,18 @@ function game:restore()
   self.found = state.found or {}
   self.money = state.money or self.money
   self.storage = state.storage or self.storage
+  if state.dex then
+    self.dex = dex.from_lists(self:pokedex().count, state.dex.seen, state.dex.caught)
+  end
+  -- Whatever the save holds is owned, whether or not it was written by a build
+  -- that had a dex. That keeps a save made before this feature from showing an
+  -- empty dex beside a full party.
+  for _, member in ipairs(self.party or {}) do
+    self:pokedex():catch(member.species)
+  end
+  for _, member in ipairs(self.storage and self.storage:every() or {}) do
+    self:pokedex():catch(member.species)
+  end
   if state.script_flags then
     self.script_flags = {
       event = state.script_flags.event or {},
@@ -631,6 +653,68 @@ function game:show_connection_demo()
   return false
 end
 
+--- Meet a few species, own a couple, then open the dex on them.
+--
+-- A dex screenshot of an empty dex would show nothing but blanks, so this walks
+-- the real registration path rather than writing into the two sets directly:
+-- the sightings come from wild rolls on real maps and the catches from the
+-- starter and a thrown ball, which is also a check that those hooks fire.
+-- @param which "entry" to open one species in detail, otherwise the list
+-- @param species optionally which one, for checking a particular entry's layout
+function game:show_dex_demo(which, species)
+  self:show_first_encounter("catch")
+  self.battle = nil
+  self.battle_lines = nil
+  self:party_leader()
+
+  -- A spread of sightings from the encounter tables of the first few maps that
+  -- have any, so the list has met and unmet species interleaved.
+  local met = 0
+  for index = 1, self.world:map_count() do
+    local map = self.world:map(index)
+    if not map.unparsed and map.encounters then
+      for _, period in ipairs(require("src.rom.encounters").times) do
+        for _, slot in ipairs((map.encounters.slots or {})[period] or {}) do
+          if self:pokedex():see(slot.species) then
+            met = met + 1
+          end
+        end
+      end
+    end
+    if met >= 20 then
+      break
+    end
+  end
+
+  if species then
+    self:pokedex():see(species)
+  end
+
+  if which == "entry" then
+    if species then
+      self:open_dex_entry(species)
+      return true
+    end
+    -- Open on the biggest sprite among everything met, because that is the
+    -- tightest the layout ever gets: a 7x7 front pic is 56 pixels wide and the
+    -- column of text beside it starts at 66. A shot of a small one would not
+    -- show whether the two collide.
+    local widest, biggest = nil, -1
+    for species = 1, self:pokedex().count do
+      local base = (self.base_stats or {})[species]
+      local area = base and (base.sprite_width or 0) * (base.sprite_height or 0)
+        or 0
+      if self:pokedex():is_seen(species) and area > biggest then
+        widest, biggest = species, area
+      end
+    end
+    self:open_dex_entry(widest or self:pokedex():first_seen(1) or 1)
+  else
+    self:open_dex()
+  end
+  return true
+end
+
 --- Catch something, then open the party summary on it.
 -- Used by the screenshot mode to show the menus with real contents.
 function game:show_party_demo()
@@ -815,7 +899,7 @@ end
 -- Menus
 --------------------------------------------------------------------------------
 
-game.START_ENTRIES = { "POKEMON", "BAG", "PC", "SAVE", "CLOSE" }
+game.START_ENTRIES = { "POKEDEX", "POKEMON", "BAG", "PC", "SAVE", "CLOSE" }
 
 -- What each pocket is called on screen. The cartridge names the pocket an item
 -- belongs to but not the pocket itself, so these labels are ours.
@@ -878,6 +962,32 @@ function game:menu_key(key)
     end
   end
 
+  -- A dex entry has no list behind it; the arrows walk the dex instead. Left
+  -- and right turn the description over, which is the shape the cartridge
+  -- stores it in, and up and down step to the neighbouring species.
+  if self.ui.kind == "dex_entry" then
+    if key == "left" or key == "a" then
+      self:dex_entry_page(-1)
+      return true
+    end
+    if key == "right" or key == "d" then
+      self:dex_entry_page(1)
+      return true
+    end
+    if key == "up" or key == "w" or key == "down" or key == "s" then
+      local step = (key == "up" or key == "w") and -1 or 1
+      local species = self.ui.species
+      for _ = 1, self:pokedex().count do
+        species = ((species - 1 + step) % self:pokedex().count) + 1
+        if self:pokedex():is_seen(species) then
+          self:open_dex_entry(species)
+          break
+        end
+      end
+      return true
+    end
+  end
+
   if key == "up" or key == "w" then
     self.ui.list:move(-1)
     return true
@@ -903,6 +1013,11 @@ function game:menu_key(key)
     elseif self.ui.kind == "choice" then
       -- Backing out of a question is answering no, the way it is in the games.
       self:answer_script(false)
+    elseif self.ui.kind == "dex_entry" then
+      self:open_dex(self.ui.species)
+    elseif self.ui.kind == "dex" then
+      self.ui = { kind = "start",
+                  list = menu.new(game.START_ENTRIES, #game.START_ENTRIES) }
     elseif self.ui.kind == "summary" then
       self:open_party()
     elseif self.ui.kind == "pocket" then
@@ -940,6 +1055,69 @@ function game:open_party()
     labels[index] = self:party_label(member)
   end
   self.ui = { kind = "party", list = menu.new(labels, 6) }
+end
+
+--------------------------------------------------------------------------------
+-- The Pokédex.
+--
+-- Two screens: the list, which shows every number the cache knows about whether
+-- or not it has been met, and one species in detail. Listing the unmet ones as
+-- blanks rather than leaving them out is deliberate — the gaps are the point of
+-- a dex, and a list that silently skipped number 4 would say nothing about
+-- there being a number 4.
+--------------------------------------------------------------------------------
+
+--- The dex, made on demand.
+--
+-- `game.new` builds one, but the tests assemble partial instances carrying only
+-- the fields the feature under test needs, and eight different places register
+-- a sighting or a catch. Reaching the dex through here rather than through the
+-- field means a fixture cannot crash on a hook it did not know about, and it is
+-- not a nil guard at each call site quietly swallowing a real absence.
+function game:pokedex()
+  if not self.dex then
+    self.dex = dex.new(#(self.species_names or {}))
+  end
+  return self.dex
+end
+
+--- One row of the list: the number, and the name if it has been seen.
+function game:dex_label(species)
+  if not self:pokedex():is_seen(species) then
+    return ("%03d %s"):format(species, ("-"):rep(5))
+  end
+  return ("%03d %s"):format(species, self.species_names[species] or "?")
+end
+
+function game:open_dex(cursor)
+  local labels = {}
+  for species = 1, self:pokedex().count do
+    labels[species] = self:dex_label(species)
+  end
+  local list = menu.new(labels, 9)
+  -- Open on something worth looking at. Landing on number 1 when the first
+  -- hundred are blank is a worse first impression than it needs to be.
+  list:select(cursor or self:pokedex():first_seen(1) or 1)
+  self.ui = { kind = "dex", list = list }
+end
+
+--- One species in detail. `page` picks which half of the description shows.
+function game:open_dex_entry(species, page)
+  if not self:pokedex():is_seen(species) then
+    self:notify("You haven't seen that one.")
+    return
+  end
+  self.ui = { kind = "dex_entry", species = species, page = page or 1 }
+end
+
+--- Flip between the two pages the cartridge stores for each description.
+function game:dex_entry_page(delta)
+  local entry = self.dex_entries[self.ui.species]
+  local pages = entry and #entry.pages or 1
+  if pages < 1 then
+    return
+  end
+  self.ui.page = ((self.ui.page - 1 + delta) % pages) + 1
 end
 
 --------------------------------------------------------------------------------
@@ -1157,6 +1335,18 @@ function game:menu_confirm()
     return
   end
 
+  if kind == "dex" then
+    self:open_dex_entry(self.ui.list.cursor)
+    return
+  end
+
+  -- A dex entry has nothing to confirm; treat it as a step back, the same way
+  -- the party summary does.
+  if kind == "dex_entry" then
+    self:open_dex(self.ui.species)
+    return
+  end
+
   if kind == "storage" then
     local which = self.ui.choices[self.ui.list.cursor]
     if which then
@@ -1196,6 +1386,8 @@ function game:menu_confirm()
     if choice == "POKEMON" then
       self:party_leader() -- makes sure the starter exists before listing
       self:open_party()
+    elseif choice == "POKEDEX" then
+      self:open_dex()
     elseif choice == "BAG" then
       self:open_bag()
     elseif choice == "PC" then
@@ -1283,6 +1475,117 @@ function game:draw_menu()
       y = y + 10
     end
 
+    love.graphics.setColor(1, 1, 1)
+    return
+  end
+
+  -- One species in detail. Like the summary, this owns the whole screen and has
+  -- no list behind it, so it must be handled before the generic list drawing.
+  if kind == "dex_entry" then
+    local species = self.ui.species
+    local entry = self.dex_entries[species]
+    local base = (self.base_stats or {})[species]
+
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", 0, 0, game.SCREEN_WIDTH, game.SCREEN_HEIGHT)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", 2.5, 2.5,
+      game.SCREEN_WIDTH - 5, game.SCREEN_HEIGHT - 5)
+
+    local sprite = self.world:species_sprite(species)
+    if sprite then
+      love.graphics.setColor(1, 1, 1)
+      love.graphics.draw(sprite, 6, 6)
+    end
+
+    love.graphics.setColor(0.1, 0.1, 0.1)
+
+    -- Beside the sprite: the number, the name, and the two measurements, which
+    -- are the four things a dex page leads with.
+    local beside = {
+      ("No.%03d"):format(species),
+      self.species_names[species] or "?",
+      entry and ("HT %s"):format(dex_rom.height_text(entry.height)) or "",
+      entry and ("WT %s"):format(dex_rom.weight_text(entry.weight)) or "",
+    }
+    for index, line in ipairs(beside) do
+      if line ~= "" then
+        font:draw_codes(self:encode(line), 66, 8 + (index - 1) * 12)
+      end
+    end
+
+    -- Full width below the sprite: the classification, the typing, the base
+    -- stats. Stat labels are two letters and the numbers three wide, because
+    -- Blissey's 255 HP has to fit the same line Sunkern's 30 does.
+    local below = {
+      entry and ("%s POKéMON"):format(entry.class) or "",
+      base and (base.type_1 == base.type_2 and base.type_1:upper()
+        or ("%s/%s"):format((base.type_1 or "?"):upper(),
+          (base.type_2 or "?"):upper())) or "",
+      base and ("HP%3d AT%3d DF%3d"):format(base.hp, base.attack,
+        base.defense) or "",
+      base and ("SP%3d SA%3d SD%3d"):format(base.speed, base.sp_attack,
+        base.sp_defense) or "",
+    }
+    for index, line in ipairs(below) do
+      if line ~= "" then
+        font:draw_codes(self:encode(line), 4, 64 + (index - 1) * 10)
+      end
+    end
+
+    -- The description, in the two pages the cartridge stores it as. Flipping
+    -- between them is left and right; showing both at once would not fit and
+    -- joining them would lose the break the cartridge put there.
+    local pages = entry and entry.pages or {}
+    local pageful = pages[self.ui.page] or {}
+    for index, line in ipairs(pageful) do
+      font:draw_codes(line.codes, 4, 106 + (index - 1) * 10)
+    end
+    if #pages > 1 then
+      font:draw_codes(self:encode(("%d/%d"):format(self.ui.page, #pages)),
+        game.SCREEN_WIDTH - 26, 8)
+    end
+    if not entry then
+      font:draw_codes(self:encode("NO DEX ENTRY"), 4, 106)
+    end
+
+    love.graphics.setColor(1, 1, 1)
+    return
+  end
+
+  -- The list of every species the cache knows about, met or not.
+  if kind == "dex" then
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", 0, 0, game.SCREEN_WIDTH, game.SCREEN_HEIGHT)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", 2.5, 2.5,
+      game.SCREEN_WIDTH - 5, game.SCREEN_HEIGHT - 5)
+
+    for position, row in ipairs(self.ui.list:window()) do
+      local y = 8 + (position - 1) * 12
+      font:draw_codes(self:encode(tostring(row.item)), 14, y)
+      love.graphics.setColor(0.1, 0.1, 0.1)
+      if row.selected then
+        love.graphics.rectangle("fill", 5, y + 2, 5, 5)
+      end
+      -- A caught species is marked rather than named differently, so the two
+      -- states the dex tracks stay distinct on one line. The mark sits in its
+      -- own column at the right margin: beside the cursor the two squares ran
+      -- together into one blob and neither could be read.
+      if self:pokedex():is_caught(row.index) then
+        love.graphics.rectangle("fill", 148, y + 1, 6, 6)
+      end
+    end
+
+    local label = ("SEEN%3d OWN%3d"):format(self:pokedex():seen_count(),
+      self:pokedex():caught_count())
+    local box_height = 20
+    local box_y = game.SCREEN_HEIGHT - box_height - 2
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", 4, box_y, 124, box_height)
+    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.rectangle("line", 6.5, box_y + 2.5, 119, box_height - 5)
+    font:draw_codes(self:encode(label), 12, box_y + 6)
     love.graphics.setColor(1, 1, 1)
     return
   end
@@ -2218,6 +2521,7 @@ function game:start_trainer_battle(trainer)
 
   self.battle = battle.new(leader, party[1], self.move_records or {},
     self.move_name_records or {}, self.species_names or {})
+  self:pokedex():see(party[1].species)
   self.battle_lines = {
     ("%s wants to fight!"):format(self.trainer.name),
     ("Sent out %s!"):format(self.species_names[party[1].species] or "?"),
@@ -2439,6 +2743,7 @@ function game:party_leader()
     local starter = pokemon.new(155, base, { level = 10 })
     starter.moves = pokemon.moves_from_learnset(starter, self.learnset_records)
     self.party[1] = starter
+    self:pokedex():catch(starter.species)
   end
 
   -- The first member still standing leads.
@@ -2516,6 +2821,9 @@ function game:award_experience(winner, fainted, from_trainer)
     if into then
       local was = name
       pokemon.evolve(winner, evolution.into, into)
+      -- The species it became is one more the player owns. Nothing else would
+      -- register it: an evolution never passes back through add_to_party.
+      self:pokedex():catch(evolution.into)
       lines[#lines + 1] = ("%s evolved into %s!"):format(was,
         self.species_names[evolution.into] or "?")
     end
@@ -2532,6 +2840,10 @@ function game:add_to_party(instance)
     return false
   end
   self.party[#self.party + 1] = instance
+  -- Anything that reaches the party is owned, whether it was caught, withdrawn
+  -- from a box or handed over. Registering here rather than at each caller is
+  -- what stops one of them being forgotten.
+  self:pokedex():catch(instance.species)
   return true
 end
 
@@ -2544,6 +2856,7 @@ function game:wild_encounter(met)
 
   local opponent = pokemon.wild(met.species, base, met.level)
   opponent.moves = pokemon.moves_from_learnset(opponent, self.learnset_records)
+  self:pokedex():see(opponent.species)
 
   -- Heal the player's Pokémon between encounters; there is nowhere to rest yet.
   leader.hp = leader.stats.hp
@@ -2725,6 +3038,9 @@ function game:throw_ball(chosen)
 
   if caught then
     local name = self.species_names[opponent.species] or "?"
+    -- Registered before it is put anywhere: a catch with a full party and full
+    -- boxes is still a catch, and the dex should say so.
+    self:pokedex():catch(opponent.species)
     if self:add_to_party(opponent) then
       lines[#lines + 1] = ("Caught %s!"):format(name)
       lines[#lines + 1] = ("Party: %d"):format(#self.party)
@@ -2979,6 +3295,7 @@ function game:send_next_trainer_pokemon()
 
   self.trainer.sent = next_index
   self.battle.opponent = next_mon
+  self:pokedex():see(next_mon.species)
   next_mon.stages = stages.new()
   -- The knockout marked the battle finished. Another Pokémon on the field
   -- means it is not.

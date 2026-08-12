@@ -50,6 +50,20 @@ function menu:move(delta)
   self.offset = math.max(0, math.min(self.offset, math.max(0, #self.items - self.visible)))
 end
 
+--- Put the cursor on a particular item, with the scroll window around it.
+--
+-- Distinct from moving there: `move` nudges the window only as far as it must,
+-- so arriving at item 19 from item 1 leaves 19 on the bottom row. A list opened
+-- part way down wants the item it opened on near the top instead.
+function menu:select(index)
+  if #self.items == 0 then
+    return
+  end
+  self.cursor = math.max(1, math.min(index, #self.items))
+  self.offset = math.max(0,
+    math.min(self.cursor - 1, math.max(0, #self.items - self.visible)))
+end
+
 --- The rows currently on screen, with their real indices.
 -- @return array of { index, item, selected }
 function menu:window()
