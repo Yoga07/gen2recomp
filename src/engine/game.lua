@@ -23,6 +23,7 @@ local storage = require("src.engine.storage")
 local clock = require("src.engine.clock")
 local dex = require("src.engine.dex")
 local dex_rom = require("src.rom.dex")
+local status_module = require("src.engine.status")
 
 local game = {}
 game.__index = game
@@ -81,6 +82,9 @@ function game.new(game_id, start_index)
   -- Which sprites are the cut tree and the boulder, found at import.
   instance.obstacles = cache.read(game_id, "obstacles") or {}
   instance.storage = storage.new()
+  -- Which status each curing item undoes, keyed by item id. Read from the
+  -- cartridge, so nothing here names an Antidote.
+  instance.cures = cache.read(game_id, "cures") or {}
   -- What the dex says about each species, and what this player has met of them.
   instance.dex_entries = cache.read(game_id, "dex_entries") or {}
   instance.dex = dex.new(#(instance.species_names or {}))
@@ -651,6 +655,43 @@ function game:show_connection_demo()
     end
   end
   return false
+end
+
+--- Poison the party leader and, optionally, undo it — then show the summary,
+--- which is where the status is written on screen.
+--
+-- The summary rather than a battle, because in battle the item's own message is
+-- pushed out of the four-line box by the opponent's reply, so a shot of it
+-- proves nothing. The summary states the status outright, so the pair of shots
+-- is the whole claim: poisoned, then not.
+--
+-- The item is found by asking the cure table which one undoes poison, not by
+-- name, which is the same thing the engine does.
+-- @param cured true to use the cure before showing the summary
+function game:show_cure_demo(cured)
+  local leader = self:party_leader()
+  if not leader then
+    return false
+  end
+  status_module.apply(leader, status_module.POISON)
+
+  if cured then
+    local wanted
+    for _, entry in ipairs(self.bag:pocket("items")) do
+      local cure = self:cure_for(entry.item)
+      if cure and cure.status == status_module.POISON then
+        wanted = entry
+      end
+    end
+    if wanted then
+      self.ui = { kind = "pocket", pocket = "items" }
+      self:use_item_in_field(wanted)
+    end
+  end
+
+  self:open_party()
+  self:menu_confirm()
+  return true
 end
 
 --- Meet a few species, own a couple, then open the dex on them.
@@ -1230,6 +1271,45 @@ function game:open_pocket(which)
               list = menu.new(labels, 6) }
 end
 
+--------------------------------------------------------------------------------
+-- Curing a status
+--
+-- Which status an item undoes comes from the cartridge's own table, so nothing
+-- below names an Antidote or a Burnt Berry. An item can both restore health and
+-- clear a status — a Full Restore does — so the two are asked separately rather
+-- than as a choice between them.
+--------------------------------------------------------------------------------
+
+--- The cure record for an item, or nil when it undoes nothing.
+function game:cure_for(item)
+  return (self.cures or {})[item]
+end
+
+--- Would this cure do anything to this Pokémon right now?
+function game:cure_applies(cure, target)
+  if not cure or not target or not target.status then
+    return false
+  end
+  if cure.status == "all" then
+    return true
+  end
+  -- Toxic is poison that climbs rather than a status of its own: the cartridge
+  -- has one poison bit and no separate toxic one, so what undoes poison undoes
+  -- both. Leaving this out would make an Antidote fail on the worse poison.
+  if cure.status == status_module.POISON then
+    return target.status == status_module.POISON
+        or target.status == status_module.TOXIC
+  end
+  return target.status == cure.status
+end
+
+--- Apply it. Returns what was cleared, for the message.
+function game:apply_cure(cure, target)
+  local was = target.status
+  status_module.clear(target)
+  return was
+end
+
 --- Use an item from the bag while walking around.
 --
 -- What an item does comes from its own record: the high nibble of the menu byte
@@ -1241,10 +1321,13 @@ function game:use_item_in_field(entry)
   local record = entry.record
   local leader = self:party_leader()
 
-  -- Same distinction the battle path makes: a parameter of zero means the item
-  -- undoes a status rather than damage, and which one is not known yet.
-  if not record or record.field_use ~= "heal"
-    or (record.parameter or 0) <= 0 then
+  -- An item may restore health, undo a status, or both — a Full Restore does
+  -- both. The parameter says how much health; the cure table says which status.
+  local cure = self:cure_for(entry.item)
+  local restores = record and record.field_use == "heal"
+    and (record.parameter or 0) > 0
+
+  if not restores and not cure then
     self:notify(("%s won't have any effect."):format(entry.name))
     return
   end
@@ -1254,16 +1337,31 @@ function game:use_item_in_field(entry)
     return
   end
 
-  if leader.hp >= leader.stats.hp then
+  local can_cure = self:cure_applies(cure, leader)
+  local hurt = leader.hp < leader.stats.hp
+
+  if not can_cure and not (restores and hurt) then
     self:notify(("%s is already healthy."):format(
       self.species_names[leader.species] or "?"))
     return
   end
 
-  local healed = math.min(record.parameter, leader.stats.hp - leader.hp)
-  leader.hp = leader.hp + healed
+  local name = self.species_names[leader.species] or "?"
+  local told
+
+  if can_cure then
+    local was = self:apply_cure(cure, leader)
+    told = ("%s shook off its %s."):format(name, was)
+  end
+
+  if restores and hurt then
+    local healed = math.min(record.parameter, leader.stats.hp - leader.hp)
+    leader.hp = leader.hp + healed
+    told = ("%s restored %d HP."):format(entry.name, healed)
+  end
+
   self.bag:remove(entry.item, 1)
-  self:notify(("%s restored %d HP."):format(entry.name, healed))
+  self:notify(told)
 
   -- The pocket has changed underneath the cursor, so rebuild it. An emptied
   -- pocket drops back to the bag rather than showing an empty list.
@@ -2982,33 +3080,45 @@ function game:use_item_in_battle(entry)
   end
 
   -- The menu nibble says "heal" for anything used on a Pokémon, which lumps
-  -- restoring HP together with curing status: an Antidote reads as a heal and
-  -- carries a parameter of zero, because what it undoes is poison rather than
-  -- damage. Which status each one cures lives in an item-effect table that has
-  -- not been located, so those are refused rather than guessed at -- treating
-  -- them as heals spent the turn to recover nothing.
-  if use ~= "heal" or (record.parameter or 0) <= 0 then
+  -- restoring HP together with undoing a status: an Antidote reads as a heal
+  -- and carries a parameter of zero, because what it undoes is poison rather
+  -- than damage. The cure table supplies the missing half, and an item can do
+  -- both — a Full Restore carries a parameter *and* a mask.
+  local cure = self:cure_for(entry.item)
+  local restores = use == "heal" and (record.parameter or 0) > 0
+
+  if not restores and not cure then
     self:notify(("%s won't have any effect."):format(entry.name))
     return
   end
 
   local target = self.battle.player
-  if target.hp >= target.stats.hp then
+  local can_cure = self:cure_applies(cure, target)
+  local hurt = target.hp < target.stats.hp
+
+  if not can_cure and not (restores and hurt) then
     self:notify(("%s is already healthy."):format(
       self.species_names[target.species] or "?"))
     return
   end
 
-  local healed = math.min(record.parameter, target.stats.hp - target.hp)
-  target.hp = target.hp + healed
+  local name = self.species_names[target.species] or "?"
+  local lines = { ("Used %s."):format(entry.name) }
+
+  if can_cure then
+    local was = self:apply_cure(cure, target)
+    lines[#lines + 1] = ("%s shook off its %s!"):format(name, was)
+  end
+
+  if restores and hurt then
+    local healed = math.min(record.parameter, target.stats.hp - target.hp)
+    target.hp = target.hp + healed
+    lines[#lines + 1] = ("%s recovered %d HP!"):format(name, healed)
+  end
+
   self.bag:remove(entry.item, 1)
   self:close_menu()
 
-  local lines = {
-    ("Used %s."):format(entry.name),
-    ("%s recovered %d HP!"):format(
-      self.species_names[target.species] or "?", healed),
-  }
   self:opponent_replies(lines)
   self.battle_lines = lines
   self.battle_state = "message"

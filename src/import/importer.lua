@@ -27,6 +27,7 @@ local machines = require("src.rom.machines")
 local obstacles = require("src.rom.obstacles")
 local learnsets = require("src.rom.learnsets")
 local dex = require("src.rom.dex")
+local cures = require("src.rom.cures")
 local cache = require("src.import.cache")
 
 local importer = {}
@@ -323,6 +324,22 @@ function importer.run(path, progress)
       machine_summary.count = machines.COUNT
       cache.write(descriptor.game, "machines", machine_result.moves)
       cache.write(descriptor.game, "hm_moves", machine_result.hm)
+    end
+  end
+
+  -- Which status each curing item undoes. Needs the item names, because that is
+  -- what turns "an Antidote cures poison" into an item id without any id being
+  -- written down here.
+  local cure_summary = { count = 0 }
+  if found.item_names then
+    step("locating the status cures")
+    local cure_result, cure_err = cures.locate(rom, found.item_names.records)
+    if not cure_result then
+      failed.cures = cure_err
+    else
+      offsets.cures = cure_result.offset
+      cure_summary.count = cure_result.count
+      cache.write(descriptor.game, "cures", cure_result.by_item)
     end
   end
 
@@ -713,6 +730,7 @@ function importer.run(path, progress)
     music = music_summary,
     machines = machine_summary,
     dex = dex_summary,
+    cures = cure_summary,
     script_code = script_summary,
     sha1 = sha1,
   }
@@ -795,6 +813,11 @@ function importer.format_report(report)
   if report.machines and report.machines.count > 0 then
     lines[#lines + 1] = ("  %-16s %4d TMs and HMs")
       :format("machines", report.machines.count)
+  end
+
+  if report.cures and report.cures.count > 0 then
+    lines[#lines + 1] = ("  %-16s %4d items undo a status")
+      :format("cures", report.cures.count)
   end
 
   if report.dex and report.dex.count > 0 then

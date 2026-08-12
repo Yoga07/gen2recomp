@@ -2480,6 +2480,184 @@ local function test_storage(base_stats)
   check_equal("at the right level", restored:box(5)[1].level, 70)
 end
 
+-- Which status each curing item undoes.
+local function test_cures(rom, item_names, item_records, base_stats)
+  log("\n== status cures ==")
+  if not item_names then
+    log("  SKIP  the item names were not located")
+    return
+  end
+
+  local cures = require("src.rom.cures")
+
+  local result, why = cures.locate(rom, item_names)
+  if not check("the cure table was located", result ~= nil, why) then
+    return
+  end
+
+  log("        %d records at 0x%06X (bank $%02X)", result.count, result.offset,
+    math.floor(result.offset / 0x4000))
+  check("more than the handful used to find it", result.count > 8)
+
+  local id_of = {}
+  for index, name in ipairs(item_names) do
+    id_of[name] = index
+  end
+
+  -- The five that found it. Restated here because they are the whole basis of
+  -- the search: what each undoes is not in dispute in any game in the series.
+  local known = {
+    { "ANTIDOTE", "poison" }, { "BURN HEAL", "burn" },
+    { "ICE HEAL", "freeze" }, { "AWAKENING", "sleep" },
+    { "PARLYZ HEAL", "paralysis" },
+  }
+  for _, entry in ipairs(known) do
+    local record = result.by_item[id_of[entry[1]]]
+    check_equal(("%s undoes %s"):format(entry[1], entry[2]),
+      record and record.status, entry[2])
+  end
+
+  -- The eight that did not, which is where the evidence actually is. The two
+  -- crossed berries are the best of them: an ICE BERRY soothing a burn and a
+  -- BURNT BERRY thawing a freeze is exactly the pairing somebody guessing from
+  -- the names would invert.
+  local unsearched = {
+    { "PSNCUREBERRY", "poison" }, { "PRZCUREBERRY", "paralysis" },
+    { "MINT BERRY", "sleep" }, { "ICE BERRY", "burn" },
+    { "BURNT BERRY", "freeze" }, { "MIRACLEBERRY", "all" },
+    { "FULL RESTORE", "all" }, { "HEAL POWDER", "all" },
+  }
+  for _, entry in ipairs(unsearched) do
+    local id = id_of[entry[1]]
+    local record = id and result.by_item[id]
+    check_equal(("%s undoes %s, and took no part in the search")
+      :format(entry[1], entry[2]), record and record.status, entry[2])
+  end
+
+  -- Every mask is a real status, and the middle byte agrees with it everywhere.
+  local unknown_mask, disagreements = 0, 0
+  local action_of = {}
+  for _, record in ipairs(result.records) do
+    if not record.status then
+      unknown_mask = unknown_mask + 1
+    end
+    if action_of[record.mask] and action_of[record.mask] ~= record.action then
+      disagreements = disagreements + 1
+    end
+    action_of[record.mask] = record.action
+  end
+  check_equal("every mask names a status", unknown_mask, 0)
+  check_equal("the middle byte agrees with the mask in every record",
+    disagreements, 0)
+
+  -- Why the obvious search does not work, asserted as the exact fact rather
+  -- than as a statistic. "Where do the curing items' ids appear together" is
+  -- close to worthless here because **the five single-status cures are
+  -- consecutive ids**: every ascending run of bytes in the cartridge contains
+  -- all five, and so does every shop stocking a Pokémon Centre's worth of
+  -- medicine. Measured in --probe-cures, they sit together at 330 places and 4
+  -- of 32 sampled five-runs do at least as well; what is sharp is not where the
+  -- ids are but what sits beside them.
+  local ordered = { "ANTIDOTE", "BURN HEAL", "ICE HEAL", "AWAKENING",
+                    "PARLYZ HEAL" }
+  local consecutive = true
+  for index = 2, #ordered do
+    if id_of[ordered[index]] ~= id_of[ordered[index - 1]] + 1 then
+      consecutive = false
+    end
+  end
+  log("        the five single-status cures are items %d to %d",
+    id_of[ordered[1]], id_of[ordered[#ordered]])
+  check("they are consecutive, which is what makes proximity useless",
+    consecutive)
+
+  -- Is the known-content check load-bearing, or is the structure enough on its
+  -- own? Claim an Antidote cures a burn and the locator must refuse: if it
+  -- still found a table, the pairing would not be what accepted this one.
+  do
+    local was = cures.KNOWN["ANTIDOTE"]
+    cures.KNOWN["ANTIDOTE"] = cures.KNOWN["BURN HEAL"]
+    local wrong = cures.locate(rom, item_names)
+    cures.KNOWN["ANTIDOTE"] = was
+    check("a wrong claim about what an Antidote does is refused", wrong == nil)
+  end
+
+  if not item_records or not base_stats then
+    return
+  end
+
+  -- And in the engine's hands. Nothing below names an item: the Antidote is
+  -- reached by asking the cure table which item undoes poison.
+  local game = require("src.engine.game")
+  local pokemon = require("src.engine.pokemon")
+  local status = require("src.engine.status")
+  local bag = require("src.engine.bag")
+
+  local poison_cure, cure_all
+  for item, record in pairs(result.by_item) do
+    if record.status == "poison" and not poison_cure then poison_cure = item end
+    if record.status == "all" and not cure_all then cure_all = item end
+  end
+
+  local instance = setmetatable({
+    cures = result.by_item,
+    item_records = item_records,
+    item_names = item_names,
+    base_stats = base_stats,
+    species_names = setmetatable({}, { __index = function() return "MON" end }),
+    party = { pokemon.new(155, base_stats[155], { level = 20 }) },
+  }, game)
+  instance.bag = bag.new(item_records, item_names)
+  instance.bag:add(poison_cure, 2)
+  instance.bag:add(cure_all, 1)
+
+  local subject = instance.party[1]
+  status.apply(subject, status.POISON)
+  check("the subject is poisoned", subject.status == status.POISON)
+
+  local entry = instance.bag:pocket("items")[1]
+  for _, candidate in ipairs(instance.bag:pocket("items")) do
+    if candidate.item == poison_cure then entry = candidate end
+  end
+  instance.ui = { kind = "pocket", pocket = "items" }
+  instance:use_item_in_field(entry)
+  check("using the poison cure clears it", subject.status == nil)
+  check_equal("and it leaves the bag",
+    instance.bag:count(poison_cure), 1)
+
+  -- Toxic is poison that climbs rather than a status of its own, and the
+  -- cartridge has one poison bit for both. An Antidote that failed on the worse
+  -- poison would be a silent hole.
+  status.apply(subject, status.TOXIC)
+  instance.ui = { kind = "pocket", pocket = "items" }
+  local again
+  for _, candidate in ipairs(instance.bag:pocket("items")) do
+    if candidate.item == poison_cure then again = candidate end
+  end
+  instance:use_item_in_field(again)
+  check("the same cure undoes the worse poison too", subject.status == nil)
+
+  -- A cure aimed at the wrong status does nothing and is not spent.
+  status.apply(subject, status.BURN)
+  instance.bag:add(poison_cure, 1)
+  local wrong
+  for _, candidate in ipairs(instance.bag:pocket("items")) do
+    if candidate.item == poison_cure then wrong = candidate end
+  end
+  instance.ui = { kind = "pocket", pocket = "items" }
+  instance:use_item_in_field(wrong)
+  check("a poison cure does nothing to a burn", subject.status == status.BURN)
+  check_equal("and stays in the bag", instance.bag:count(poison_cure), 1)
+
+  local everything
+  for _, candidate in ipairs(instance.bag:pocket("items")) do
+    if candidate.item == cure_all then everything = candidate end
+  end
+  instance.ui = { kind = "pocket", pocket = "items" }
+  instance:use_item_in_field(everything)
+  check("but the one that undoes everything does", subject.status == nil)
+end
+
 -- The Pokédex entries: classification, height, weight and description.
 --
 -- The table is found by shape alone -- there is no first record to encode as a
@@ -4677,6 +4855,13 @@ local function test_foreign(path)
     { "std scripts",
       function() return require("src.rom.std_scripts").locate(other) end },
     { "palettes", function() return palettes.locate(other) end },
+    -- Refuses because the item names it needs do not locate here, which is the
+    -- pipeline stopping early rather than a search of its own failing.
+    { "cures", function()
+        local other_names = locate.table(locate.descriptors.item_names, other)
+        return require("src.rom.cures").locate(other,
+          other_names and other_names.records)
+      end },
   }
 
   for _, entry in ipairs(standalone) do
@@ -4740,6 +4925,10 @@ function harness.run(rom_path, report_path, other_rom)
     test_fainting(found and found.base_stats and found.base_stats.records)
     test_clock()
     test_storage(found and found.base_stats and found.base_stats.records)
+    test_cures(rom,
+      found and found.item_names and found.item_names.records,
+      found and found.item_attributes and found.item_attributes.records,
+      found and found.base_stats and found.base_stats.records)
     test_dex(rom, found and found.species_names and found.species_names.records)
     test_dex_tracking(found and found.base_stats and found.base_stats.records)
     test_obstacles(rom, map_result)

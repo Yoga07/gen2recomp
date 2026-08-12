@@ -785,6 +785,100 @@ one place a name is read, and only to tell Master, Ultra and Great from the
 rest; the conditional balls fall through to the plain multiplier, which is what
 they are worth when their condition is not met.
 
+### The status cures, and a search that finds itself in a shop
+
+An item's parameter says *how much* — a Potion's 20, a Super Potion's 60 — and
+nothing in the engine is keyed on an item id because of it. The status cures
+break that scheme: **an Antidote's parameter is 0**, because what it does is not
+a quantity. For a long time those items were refused rather than guessed at, so
+every Antidote in the game silently did nothing.
+
+The missing half is fourteen three-byte records terminated by `$FF`:
+
+```
+09 F0 08   ANTIDOTE     poison
+0A F1 10   BURN HEAL    burn
+0B F2 20   ICE HEAL     freeze
+0C F3 07   AWAKENING    sleep
+0D F4 40   PARLYZ HEAL  paralysis
+26 F6 FF   FULL HEAL    everything
+```
+
+The third byte is a mask over the Gen 2 status byte, which packs sleep into the
+low three bits and gives poison, burn, freeze and paralysis one bit each above
+them — which is why the masks are single bits and `$07`, and why `$FF` reads as
+"all of it".
+
+#### Where the ids are says almost nothing
+
+The obvious search is "where do the curing items' ids appear together", and it
+is close to worthless. **The five single-status cures are items 9, 10, 11, 12
+and 13 — consecutive.** Every ascending run of bytes in two megabytes contains
+all five, and so does every shop stocking a Pokémon Centre's worth of medicine.
+
+The first run of this search returned three hits at stride 7, all of them inside
+the mart lists, which is exactly the trap: a shop that sells every status cure
+contains every status cure's id by definition, and there are 34 shops. Scored
+against other runs of five consecutive ids the real five are unremarkable — 330
+places at stride 2, where the average run manages 296 and four of thirty-two
+sampled runs do at least as well.
+
+A first attempt at a noise floor made it look far better than it was, by scoring
+sets of six *random* ids. Random ids are not consecutive, so they scored zero
+and the real set looked extraordinary. **The control has to match the shape of
+the thing it is controlling for**, not merely its size.
+
+#### What is sharp is what sits beside them
+
+A status mask has very few bits set, and six different items must undo six
+different things. So the demand is not that the ids be near each other but that
+each be accompanied, at a fixed distance, by a byte that is distinct from the
+others and sparse. Across every stride and every distance, that leaves one
+candidate that reads as statuses at all — and it reads perfectly: six items
+whose effect nobody disputes, mapped one-to-one onto six separate,
+non-overlapping bit positions.
+
+#### The eight records that confirm it
+
+Six records found the table. The other eight took no part in it, and every one
+lands:
+
+| item | undoes | |
+|---|---|---|
+| PSNCUREBERRY | poison | the name says so outright |
+| PRZCUREBERRY | paralysis | so does this one |
+| MINT BERRY | sleep | |
+| **ICE BERRY** | **burn** | crossed |
+| **BURNT BERRY** | **freeze** | crossed the other way |
+| FULL RESTORE, HEAL POWDER, MIRACLEBERRY | everything | |
+
+The two crossed berries are the best evidence in the set. An ice berry soothing
+a burn and a burnt berry thawing a freeze is precisely the pairing somebody
+guessing from the names would invert, and the table gets both the right way
+round without being asked.
+
+There is one more agreement to have for free. The middle byte is a second
+encoding of the same fact — `$F0` wherever the mask is poison, `$F1` wherever it
+is burn — and it is one-to-one with the mask across all fourteen records. Two
+readings of the same thing agreeing everywhere is worth asserting, so it is.
+
+#### In the engine
+
+Nothing names an Antidote. An item undoes a status because the cartridge says
+so, the same way a Super Potion heals more than a Potion because the cartridge
+says 60 against 20. Two details are not obvious:
+
+- **An item can do both.** A Full Restore carries a parameter *and* a mask, so
+  restoring health and clearing a status are asked separately rather than as a
+  choice between them.
+- **Toxic is poison.** The engine models badly-poisoned as its own status, but
+  the cartridge has one poison bit and no separate toxic one, so whatever undoes
+  poison undoes both. Leaving that out would have made an Antidote fail on the
+  worse poison — a hole in exactly the case a player would notice.
+
+A cure aimed at the wrong status does nothing *and is not spent*, which is the
+behaviour that distinguishes a real check from a shrug.
+
 ### Item balls, and how the type nibble was finally pinned down
 
 An object's type nibble was read as 0 script, 1 item ball, 2 trainer, but only

@@ -43,6 +43,7 @@ local HEADLESS = {
   ["--probe-tmhm"] = "tests.probe_tmhm",
   ["--probe-dex"] = "tests.probe_dex",
   ["--probe-foreign"] = "tests.probe_foreign",
+  ["--probe-cures"] = "tests.probe_cures",
   ["--probe-terrain"] = "tests.probe_terrain",
   ["--probe-time"] = "tests.probe_time",
   ["--dump-tilesets"] = "tests.dump_tilesets",
@@ -157,6 +158,7 @@ function love.load(args)
           or args[i + 2] == "switch" or args[i + 2] == "battleparty"
           or args[i + 2] == "battlebag" or args[i + 2] == "battleswitch"
           or args[i + 2] == "battleheal" or args[i + 2] == "boxcatch"
+          or args[i + 2] == "poisoned" or args[i + 2] == "cured"
           or args[i + 2] == "pc"
           or args[i + 2] == "menu" or args[i + 2] == "connection"
           or args[i + 2] == "trainer" or args[i + 2] == "bag"
@@ -232,6 +234,9 @@ function love.load(args)
       state.game:show_trainer_demo()
     elseif state.shot and state.shot.sign == "connection" then
       state.game:show_connection_demo()
+    elseif state.shot and (state.shot.sign == "poisoned"
+      or state.shot.sign == "cured") then
+      state.game:show_cure_demo(state.shot.sign == "cured")
     elseif state.shot and (state.shot.sign == "dex"
       or state.shot.sign == "dexentry") then
       state.game:show_dex_demo(state.shot.sign == "dexentry" and "entry" or nil,

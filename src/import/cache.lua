@@ -12,8 +12,9 @@ local cache = {}
 --
 -- 2 adds the Pokédex entries. A cache written before them would load and run,
 -- with an empty dex and no sign of why, which is exactly the half-read state
--- this number exists to prevent.
-cache.FORMAT_VERSION = 2
+-- this number exists to prevent. 3 adds the status cures, for the same reason:
+-- without them every Antidote in the game silently does nothing.
+cache.FORMAT_VERSION = 3
 
 local ROOT = "cache"
 

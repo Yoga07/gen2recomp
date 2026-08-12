@@ -57,6 +57,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** script interpreter | working — 14558 instructions decoded |
 | **Engine:** status conditions and stat stages | working |
 | Items: names, prices, pockets, effects | working — 255 items |
+| Status cures: which item undoes what | working — 14 items |
 | **Engine:** the bag, and items in battle | working — 4 pockets |
 | Item balls on the ground | working — 178 pickups |
 | Hidden items | working — 85, keyed by event flag |
@@ -98,9 +99,9 @@ Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-652 tests pass against Crystal (USA/Europe) rev 1, SHA-1
-`f2f52230b536214ef7c9924f483392993e226cfb`, and a further 17 run when a second,
-deliberately wrong cartridge is supplied — 669 in all. Nothing is claimed to be
+678 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+`f2f52230b536214ef7c9924f483392993e226cfb`, and a further 18 run when a second,
+deliberately wrong cartridge is supplied — 696 in all. Nothing is claimed to be
 correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these
@@ -123,6 +124,7 @@ itself and does not depend on them:
 | Water encounters | `0x02B11D` | `$0A` |
 | Trainer parties | `0x039A1F` | `$0E` |
 | Pokédex entry pointers | `0x044378` | `$11` |
+| Status cures | `0x00F071` | `$03` |
 
 ## Requirements
 
