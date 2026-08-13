@@ -133,6 +133,7 @@ function apu.new(rate)
   for index = 0, 15 do
     instance.wave.ram[index] = 0
   end
+  instance:unpack_mix()
   return instance
 end
 
@@ -265,9 +266,11 @@ function apu:write(address, value)
   elseif address == 0xFF24 then
     self.right_volume = bit.band(value, 0x07)
     self.left_volume = bit.band(bit.rshift(value, 4), 0x07)
+    self:unpack_mix()
 
   elseif address == 0xFF25 then
     self.panning = value
+    self:unpack_mix()
 
   elseif address == 0xFF26 then
     local on = bit.band(value, 0x80) ~= 0
@@ -509,6 +512,26 @@ end
 -- Output
 --------------------------------------------------------------------------------
 
+--- Unpack the routing and volume registers into what the mixer actually needs.
+--
+-- NR51's low nibble routes each channel right and its high nibble left, and
+-- NR50 holds a volume of 0 to 7 per side meaning one eighth to full. Both
+-- change rarely and are read once per sample, so they are turned into plain
+-- fields when written instead of being decoded in the inner loop.
+function apu:unpack_mix()
+  local panning = self.panning
+  self.right1 = bit.band(panning, 0x01) ~= 0
+  self.right2 = bit.band(panning, 0x02) ~= 0
+  self.right3 = bit.band(panning, 0x04) ~= 0
+  self.right4 = bit.band(panning, 0x08) ~= 0
+  self.left1 = bit.band(panning, 0x10) ~= 0
+  self.left2 = bit.band(panning, 0x20) ~= 0
+  self.left3 = bit.band(panning, 0x40) ~= 0
+  self.left4 = bit.band(panning, 0x80) ~= 0
+  self.left_gain = (self.left_volume + 1) / 8 / 4
+  self.right_gain = (self.right_volume + 1) / 8 / 4
+end
+
 --- What each channel is putting out right now, 0 to 15.
 function apu:levels()
   local square1, square2 = self.square1, self.square2
@@ -537,41 +560,42 @@ function apu:levels()
 end
 
 --- Mix to two analogue channels in the range -1 to 1.
+--
+-- Written without allocating anything, and deliberately so. This runs at least
+-- once per output sample, so the two small tables an earlier version built here
+-- came to some ninety thousand allocations per second of audio and were most of
+-- the cost of the whole chip. The panning bits are unpacked when NR51 is
+-- written rather than re-tested eight times a sample for the same reason.
 function apu:mix()
   if not self.power then
     return 0, 0
   end
 
-  local levels = { self:levels() }
-  local dac = {}
-  for index = 1, 4 do
-    -- Each channel's DAC maps 0..15 onto the full analogue range. A channel
-    -- whose DAC is off contributes nothing rather than a steady -1.
-    dac[index] = levels[index] / 7.5 - 1
-  end
-  -- Silence the ones whose DAC is off, so they do not sit at -1 and shove the
+  local one, two, three, four = self:levels()
+  local square1, square2 = self.square1, self.square2
+  local wave, noise = self.wave, self.noise
+
+  -- Each channel's DAC maps 0..15 onto the full analogue range. A channel whose
+  -- DAC is off contributes nothing rather than sitting at -1 and shoving the
   -- mix off centre.
-  if not (self.square1.enabled and self.square1.dac) then dac[1] = 0 end
-  if not (self.square2.enabled and self.square2.dac) then dac[2] = 0 end
-  if not (self.wave.enabled and self.wave.dac) then dac[3] = 0 end
-  if not (self.noise.enabled and self.noise.dac) then dac[4] = 0 end
+  local dac1 = (square1.enabled and square1.dac) and (one / 7.5 - 1) or 0
+  local dac2 = (square2.enabled and square2.dac) and (two / 7.5 - 1) or 0
+  local dac3 = (wave.enabled and wave.dac) and (three / 7.5 - 1) or 0
+  local dac4 = (noise.enabled and noise.dac) and (four / 7.5 - 1) or 0
 
   local left, right = 0, 0
-  for index = 1, 4 do
-    -- NR51: the low nibble routes each channel right, the high nibble left.
-    if bit.band(self.panning, bit.lshift(1, index - 1)) ~= 0 then
-      right = right + dac[index]
-    end
-    if bit.band(self.panning, bit.lshift(1, index + 3)) ~= 0 then
-      left = left + dac[index]
-    end
-  end
+  if self.left1 then left = left + dac1 end
+  if self.left2 then left = left + dac2 end
+  if self.left3 then left = left + dac3 end
+  if self.left4 then left = left + dac4 end
+  if self.right1 then right = right + dac1 end
+  if self.right2 then right = right + dac2 end
+  if self.right3 then right = right + dac3 end
+  if self.right4 then right = right + dac4 end
 
   -- Four channels summed, then the master volume, which is a value of 0 to 7
   -- meaning one eighth to full.
-  left = left / 4 * ((self.left_volume + 1) / 8)
-  right = right / 4 * ((self.right_volume + 1) / 8)
-  return left, right
+  return left * self.left_gain, right * self.right_gain
 end
 
 --- Produce `frames` stereo samples.
@@ -583,9 +607,20 @@ end
 -- @return a flat array, left and right interleaved
 function apu:generate(frames)
   local out = {}
+  self:generate_into(out, 0, frames)
+  return out
+end
+
+--- The same, writing into a buffer the caller already has.
+--
+-- Worth having separately rather than being tidy about it: the game generates
+-- audio inside its own frame, and building one table here only to copy it into
+-- another was costing more than the synthesis itself.
+-- @param base how many entries are already in `out`
+function apu:generate_into(out, base, frames)
   local per_frame = apu.CLOCK / self.rate
 
-  for _ = 1, frames do
+  for index = 0, frames - 1 do
     self.cycle_debt = self.cycle_debt + per_frame
     local budget = math.floor(self.cycle_debt)
     self.cycle_debt = self.cycle_debt - budget
@@ -625,11 +660,11 @@ function apu:generate(frames)
     self.capacitor_left = left - filtered_left * self.charge
     self.capacitor_right = right - filtered_right * self.charge
 
-    out[#out + 1] = filtered_left
-    out[#out + 1] = filtered_right
+    out[base + index * 2 + 1] = filtered_left
+    out[base + index * 2 + 2] = filtered_right
   end
 
-  return out
+  return frames * 2
 end
 
 --- Silence everything without powering the chip down.

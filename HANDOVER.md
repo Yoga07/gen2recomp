@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 56 commits in, 723 tests passing
-against Crystal and none failing — 741 with a second, deliberately wrong
+Written at commit `6db0197` and updated since, 58 commits in, 732 tests passing
+against Crystal and none failing — 750 with a second, deliberately wrong
 cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
@@ -42,7 +42,7 @@ is one at `C:\Users\yoges\Downloads\Pokemon - Red Version (UE)[!] (1)\`.
 
 It needs `$env:LOVE_EXE` pointing at `love.exe`.
 
-`cache.FORMAT_VERSION` is 4 as of the whirlpool value. A cache written by an earlier
+`cache.FORMAT_VERSION` is 5 as of the music banks. A cache written by an earlier
 build is reported as stale and has to be re-imported rather than half-read, so
 the first thing a new session does after checking out is usually `--import`.
 
@@ -160,7 +160,7 @@ cures, and reading a real `.sav`.
 | | state |
 |---|---|
 | Badges | tracked and gated, but nothing awards them |
-| Audio in the game | it renders to a file; nothing plays it while you walk |
+| Sound effects and cries | the tables that index them are not located |
 | `special` routines | 127 of them, assembly, not runnable from bytecode |
 | Unown's 26 forms | pic table locator does not find them |
 
@@ -210,10 +210,15 @@ problems and only one of them is the wall:
    shape found so far, so pitches are computed from equal temperament here. See
    `--probe-pitch` for that negative result — the best fit anywhere in two
    megabytes is 14% off and is a sine table.
-5. **Wiring it into the game.** Not done. `playsound` ×189, `playmusic` ×79,
-   `cry` ×70 and `waitsfx` ×85 are still in the interpreter's ignored list, and
-   map headers already name a music id, so the pieces are all present. `cry`
-   operands run to 250, so they are species ids rather than cry-table indices.
+5. **Wiring it into the game.** Done. Each map plays its own tune, and
+   `playmusic` is no longer ignored. The channel data is cached as whole banks
+   (`music_banks`), because `sound_call` goes anywhere inside a bank and songs
+   share subroutines; a test asserts a song rendered from the cache is sample
+   for sample identical to the same song rendered from the cartridge.
+   `playsound` ×189 and `cry` ×70 are **still ignored on purpose**: sfx ids run
+   to 202 against 103 song slots so they index a table nobody has located, and
+   `cry` needs cry data that has not been found. Pointing either at the song
+   table would play an arbitrary tune whenever somebody opened a door.
 
 ### The one unverified claim
 

@@ -378,6 +378,36 @@ function importer.run(path, progress)
     music_summary.decoded = music_result.decoded
     music_summary.exact = music_result.exact
     cache.write(descriptor.game, "music", music_result.songs)
+
+    -- The channel data itself, so the engine can play a song without ever
+    -- seeing a cartridge. Whole banks rather than per-song extracts, because
+    -- `sound_call` sends a channel anywhere inside its own bank and songs
+    -- share subroutines: slicing per song would cut those calls in half.
+    --
+    -- Hex rather than raw bytes. The cache is Lua source and a raw control
+    -- byte inside a quoted string is not reliably something Lua will read
+    -- back, which is a corruption that would show up as music rather than as
+    -- an error.
+    local banks, order = {}, {}
+    for _, song in ipairs(music_result.songs) do
+      if not song.unparsed and not banks[song.bank] then
+        banks[song.bank] = true
+        order[#order + 1] = song.bank
+      end
+    end
+    table.sort(order)
+
+    local encoded = {}
+    for _, bank in ipairs(order) do
+      local raw = rom:read(bank * 0x4000, 0x4000)
+      local hex = {}
+      for index = 1, #raw do
+        hex[index] = ("%02X"):format(raw:byte(index))
+      end
+      encoded[tostring(bank)] = table.concat(hex)
+    end
+    music_summary.banks = #order
+    cache.write(descriptor.game, "music_banks", encoded)
   end
 
   -- The font, so the engine can draw text in the cartridge's own letters.
@@ -469,6 +499,10 @@ function importer.run(path, progress)
           header_offset = header.offset,
           tileset = header.tileset,
           environment = header.environment_name,
+          -- Which song plays here. Decoded from the header all along and never
+          -- carried across, because until there was a sequencer nothing could
+          -- have used it.
+          music = header.music,
           width = attributes.width,
           height = attributes.height,
           border_block = attributes.border_block,

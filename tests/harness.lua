@@ -2702,6 +2702,174 @@ local function test_sequencer(rom)
     out_of_range, 0)
 end
 
+-- Music in the game, played from the cache rather than from a cartridge.
+local function test_game_music(rom)
+  log("\n== music in the game ==")
+
+  local cache_module = require("src.import.cache")
+  local music_engine = require("src.engine.music")
+  local apu_module = require("src.audio.apu")
+  local sequencer = require("src.audio.sequencer")
+  local music_rom = require("src.rom.music")
+
+  local game_id
+  for _, entry in ipairs(cache_module.list_games()) do
+    if entry.current then
+      game_id = entry.game
+    end
+  end
+  if not game_id then
+    log("  SKIP  no current import in the cache")
+    return
+  end
+
+  local player, why = music_engine.load(game_id)
+  if not check("the engine loads music from the cache", player ~= nil, why) then
+    return
+  end
+
+  -- Every map names a song, and every song it names has to be in the table.
+  -- This is the link that had been decoded since the map headers were first
+  -- read and never carried across, so it is worth asserting rather than
+  -- assuming.
+  local maps_cached = cache_module.read(game_id, "maps") or {}
+  local with_music, resolved, highest = 0, 0, 0
+  for _, map in ipairs(maps_cached) do
+    if map.music then
+      with_music = with_music + 1
+      highest = math.max(highest, map.music)
+      local song = player.songs[map.music + 1]
+      if song and not song.unparsed then
+        resolved = resolved + 1
+      end
+    end
+  end
+  log("        %d maps name a song, %d of them resolve, highest id %d",
+    with_music, resolved, highest)
+  check("almost every map names a song", with_music > 300)
+  check("and almost all of those songs exist",
+    resolved >= with_music * 0.97,
+    ("%d of %d"):format(resolved, with_music))
+
+  -- The ones that do not resolve are worth pinning down rather than absorbing
+  -- into a percentage, because a structure naming positions past the end of
+  -- another is exactly how this table was found to be truncated the first time.
+  -- It is not truncated again: **one** id is out of range, and the five maps
+  -- using it are consecutive and all indoor, which is one building rather than
+  -- a scatter. That is a sentinel, not a missing tail.
+  local strays, stray_maps = {}, {}
+  for index, map in ipairs(maps_cached) do
+    if map.music then
+      local song = player.songs[map.music + 1]
+      if not song or song.unparsed then
+        strays[map.music] = (strays[map.music] or 0) + 1
+        stray_maps[#stray_maps + 1] = index
+      end
+    end
+  end
+  local distinct_strays = 0
+  for id, times in pairs(strays) do
+    distinct_strays = distinct_strays + 1
+    log("        id %d is out of range, used by %d maps", id, times)
+  end
+  check("only one music id falls outside the table", distinct_strays <= 1)
+
+  local consecutive = true
+  for slot = 2, #stray_maps do
+    if stray_maps[slot] ~= stray_maps[slot - 1] + 1 then
+      consecutive = false
+    end
+  end
+  check("and the maps using it are one contiguous run, not a scatter",
+    consecutive, table.concat(stray_maps, ", "))
+
+  -- An unresolvable id must leave the music alone rather than cutting it off.
+  if player:play(12) then
+    local before = player.playing
+    player:play(189)
+    check_equal("an id with no song leaves the current one playing",
+      player.playing, before)
+  end
+
+  -- The cache has to be a faithful copy of the cartridge, and the sharpest way
+  -- to say so is that playing from it produces the identical waveform. A bank
+  -- that survived the hex round trip with one byte wrong would still play, and
+  -- would play something subtly different.
+  local located = music_rom.locate(rom)
+  if located then
+    local index
+    for slot, song in ipairs(located.songs) do
+      if not song.unparsed and not index and slot > 12 then
+        index = slot - 1
+      end
+    end
+
+    if index and player:play(index) then
+      local from_cache = player:render(20000)
+
+      local song = located.songs[index + 1]
+      local chip = apu_module.new(music_engine.RATE)
+      local direct = sequencer.new(rom.data, chip)
+      local channels = {}
+      for slot, address in ipairs(song.channels) do
+        channels[slot] = song.bank * 0x4000 + (address - 0x4000)
+      end
+      direct:play(channels, song.bank)
+
+      -- Drive the ROM-fed one the same way the engine drives the cached one.
+      local reference, written = {}, 0
+      local debt = 0
+      local per_frame = music_engine.RATE / sequencer.FRAME_RATE
+      while written < 10000 do
+        if debt <= 0 then
+          if not direct:frame() then
+            break
+          end
+          debt = debt + per_frame
+        end
+        local take = math.min(10000 - written, math.floor(debt))
+        if take < 1 then take = 1 end
+        for _, sample in ipairs(chip:generate(take)) do
+          reference[#reference + 1] = sample
+        end
+        written = written + take
+        debt = debt - take
+      end
+
+      local differences = 0
+      for slot = 1, #reference do
+        if from_cache[slot] ~= reference[slot] then
+          differences = differences + 1
+        end
+      end
+      log("        song %d rendered from the cache and from the cartridge: " ..
+        "%d samples compared", index, #reference)
+      check_equal("the cached banks play identically to the cartridge",
+        differences, 0)
+    end
+  end
+
+  -- And it actually makes a sound.
+  player:play(12)
+  local loud = 0
+  for _, sample in ipairs(player:render(20000)) do
+    loud = math.max(loud, math.abs(sample))
+  end
+  check("what comes out is not silence", loud > 0.01,
+    ("peak %.4f"):format(loud))
+
+  -- Fast enough to keep up with itself. This has to run inside the game loop
+  -- alongside everything else, so generating a second of audio has to cost a
+  -- good deal less than a second.
+  player:play(31)
+  local started = os.clock()
+  player:render(music_engine.RATE)
+  local spent = os.clock() - started
+  log("        one second of audio takes %.3fs to generate", spent)
+  check("generating audio is faster than playing it", spent < 0.5,
+    ("%.3fs"):format(spent))
+end
+
 -- The sound chip.
 --
 -- A sound chip has a failure mode nothing else here has: **it makes a noise
@@ -5630,6 +5798,7 @@ function harness.run(rom_path, report_path, other_rom)
     test_music(rom)
     test_music_ops(rom)
     test_sequencer(rom)
+    test_game_music(rom)
     test_movement(rom, map_result)
     test_script_vm(rom, map_result)
     test_hidden_items(rom, map_result,

@@ -14,8 +14,10 @@ local cache = {}
 -- with an empty dex and no sign of why, which is exactly the half-read state
 -- this number exists to prevent. 3 adds the status cures, for the same reason:
 -- without them every Antidote in the game silently does nothing. 4 adds the
--- whirlpool value, without which the sea is quietly open.
-cache.FORMAT_VERSION = 4
+-- whirlpool value, without which the sea is quietly open. 5 adds the music
+-- banks and the music id on each map, without which the game plays in silence
+-- and never says why.
+cache.FORMAT_VERSION = 5
 
 local ROOT = "cache"
 

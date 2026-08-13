@@ -1769,6 +1769,72 @@ The pitch mapping is confirmed too, in the only way it could be. It is ours
 rather than the cartridge's, so a mapping shifted by an octave would have
 produced music that was recognisable and *wrong*, and a listener says at once.
 
+## Music while you walk around
+
+The engine never sees a cartridge, so playing a song means the channel data has
+to be in the cache. **Whole banks**, not per-song extracts: `sound_call` sends a
+channel anywhere inside its own bank and songs share subroutines, so slicing per
+song would cut those calls in half. Six banks, and the sequencer reads through a
+function rather than indexing an image, because the engine holds a handful of
+banks and not two megabytes.
+
+They are stored as hex rather than as raw bytes. The cache is Lua source, and a
+raw control byte inside a quoted string is not reliably something Lua reads
+back — a corruption that would surface as *music* rather than as an error, which
+is the worst way for it to surface.
+
+That the copy is faithful is asserted the sharpest way available: **the same song
+rendered from the cache and from the cartridge produces identical samples.** A
+bank that survived the round trip with one byte wrong would still play, and would
+play something subtly different.
+
+### The link that had been decoded all along
+
+A map header names its music, and `maps.decode_header` had been reading that
+field since the map headers were first understood. It was never carried into the
+cache, because until there was a sequencer nothing could have used it. Adding
+one line to the importer is the whole of "each map plays its own tune".
+
+384 maps name a song and 379 of those songs exist. The five that do not all name
+the **same** id, 189, and they are consecutive in the map table and all indoor —
+one building rather than a scatter. Every other id any map or script asks for is
+inside the table.
+
+That distinction is worth making carefully, because this exact shape is how the
+music table was found to be truncated in the first place: a structure naming
+positions past the end of another. Here it is not that. The table's end was
+established independently — index 103 names bank `$C0`, which this cartridge
+does not have — and a single out-of-range value used by one contiguous place is
+a sentinel rather than a missing tail. What it is a sentinel *for* is not
+established, so an unresolvable id leaves whatever is playing alone, which is
+the least wrong behaviour under either reading. The tests assert that there is
+exactly one such id and that its maps are contiguous, so a real truncation could
+not hide behind the same percentage.
+
+### What is wired and what is deliberately not
+
+`playmusic` stops being an ignored command: a script that changes the music now
+changes it.
+
+`playsound` and `cry` do not, and the reason is the same both times. Sound
+effects are indexed separately — their operands run to 202 against the table's
+103 slots — so they name something that has not been located. `cry` takes a
+species id and needs cry data that has not been found either. Pointing either at
+the song table would play an arbitrary tune every time somebody opened a door,
+which is worse than silence and much harder to notice as a bug.
+
+### The mixer was most of the cost
+
+Generating a second of audio took 0.358 seconds, which is a third of a core for
+sound alone. Almost none of it was arithmetic.
+
+`mix` runs at least once per output sample and was building two small tables
+each time — some ninety thousand allocations per second of audio. Rewriting it
+to use locals, and unpacking NR50 and NR51 into plain fields when they are
+written rather than re-testing eight bits per sample, took it to **0.222**. The
+byte-identical comparison against the cartridge is what makes that safe to do:
+an optimisation that changed the output would fail it.
+
 ### Movement
 
 `applymovement` names an object and points at a little language of its own: one

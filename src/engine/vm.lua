@@ -545,6 +545,26 @@ function VM:step()
     return
   end
 
+  -- Music. The song table is located and the sequencer can play it, so this
+  -- stops being ignored: a script that changes the music now changes it.
+  --
+  -- Its sibling `playsound` does not, and the reason is worth keeping. Sound
+  -- effects are indexed separately — their operands run past the end of the
+  -- song table, up to 202 against 103 slots — so they name a table this project
+  -- has not located. `cry` likewise takes a species id and needs cry data that
+  -- has not been found. Both stay ignored rather than being pointed at the
+  -- wrong table, which would play an arbitrary tune every time somebody opened
+  -- a door.
+  if op == "playmusic" and self.host and self.host.script_play_music then
+    local song = instruction.args and instruction.args[1]
+    if song then
+      self.host:script_play_music(song)
+    end
+    self.performed = (self.performed or 0) + 1
+    self:advance()
+    return
+  end
+
   -- A command that ends the script has to end it even when we do not implement
   -- what it does. jumpstd is the one that matters: it transfers control into
   -- the standard-script table, which is not decoded, and the decoder stops

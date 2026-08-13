@@ -83,11 +83,21 @@ function sequencer.frequency(pitch, octave, transpose_octave, transpose_pitch)
   return value
 end
 
---- @param data the cartridge image as a string
+--- @param source the bytes to play: either a string indexed by flat offset, or
+--        a function(offset) returning a byte. The engine supplies a function,
+--        because it only ever reads the cache and holds the music banks
+--        separately rather than as one image.
 -- @param apu something with :write(address, value)
-function sequencer.new(data, apu)
+function sequencer.new(source, apu)
+  local read = source
+  if type(source) == "string" then
+    read = function(offset)
+      return string.byte(source, offset + 1)
+    end
+  end
+
   return setmetatable({
-    data = data,
+    read = read,
     apu = apu,
     channels = {},
     tempo = 256,
@@ -138,7 +148,7 @@ function sequencer:play(channels, bank)
 end
 
 function sequencer:byte(channel)
-  local value = string.byte(self.data, channel.pc + 1) or 0xFF
+  local value = self.read(channel.pc) or 0xFF
   channel.pc = channel.pc + 1
   return value
 end

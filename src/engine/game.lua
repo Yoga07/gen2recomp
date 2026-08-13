@@ -24,6 +24,7 @@ local clock = require("src.engine.clock")
 local dex = require("src.engine.dex")
 local dex_rom = require("src.rom.dex")
 local status_module = require("src.engine.status")
+local music_module = require("src.engine.music")
 
 local game = {}
 game.__index = game
@@ -82,6 +83,13 @@ function game.new(game_id, start_index)
   -- Which sprites are the cut tree and the boulder, found at import.
   instance.obstacles = cache.read(game_id, "obstacles") or {}
   instance.storage = storage.new()
+  -- The music. Optional: a cache written before the sequencer existed has no
+  -- banks in it, and the game is perfectly playable in silence, so a failure
+  -- here is reported rather than fatal.
+  local tune, tune_why = music_module.load(game_id)
+  instance.music = tune
+  instance.music_why = tune_why
+
   -- Which status each curing item undoes, keyed by item id. Read from the
   -- cartridge, so nothing here names an Antidote.
   instance.cures = cache.read(game_id, "cures") or {}
@@ -262,6 +270,13 @@ function game:enter(map_index, cell_x, cell_y, facing)
     self.player:place(cell_x, cell_y, facing)
   else
     self.player = player.new(cell_x, cell_y)
+  end
+
+  -- Each map names its own song. Playing the one already playing is ignored
+  -- inside the player, so walking between two maps that share a tune does not
+  -- restart it at every doorway.
+  if self.music and self.map and self.map.music then
+    self.music:play(self.map.music)
   end
 end
 
@@ -2002,6 +2017,13 @@ function game:script_pocket_full()
   return self.bag:room_for(0) <= 0
 end
 
+--- A script changing the music.
+function game:script_play_music(song)
+  if self.music then
+    self.music:play(song)
+  end
+end
+
 function game:script_money()
   return self.money
 end
@@ -2794,6 +2816,12 @@ function game:update(dt)
     if self.message_timer <= 0 then
       self.message = nil
     end
+  end
+
+  -- Keep the audio queue fed. Everything else in this function can stall for a
+  -- frame without anyone noticing; sound cannot.
+  if self.music then
+    self.music:update()
   end
 
   local event, cell_x, cell_y = self.player:update(dt, self:held_direction(),

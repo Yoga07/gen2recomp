@@ -73,7 +73,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Channel bytecode | widths borrowed from pokecrystal — bounded above, see docs |
 | Game Boy sound chip | working — measured against the hardware, and heard |
 | **Engine:** music sequencer | working — 99 of 100 songs play, and sound right |
-| Audio playback | renders to a file; not wired into the game yet |
+| **Engine:** music while you play | working — each map plays its own tune |
 | Reading real .sav files | working — read from a real Crystal save |
 | **Engine:** map edge connections | working — 142 crossings |
 | **Engine:** trainer battles | working — 518 trainers across 57 classes |
@@ -95,16 +95,18 @@ and the bag, whose four pockets are filled from what the cartridge says each
 item is. The Pokédex is there too: every species you have met and every one you
 have owned, and a page on each with its sprite, its classification, its height
 and weight, its typing, its base stats and the two pages of description the
-cartridge itself carries, turned over with left and right. F5 saves, and the
+cartridge itself carries, turned over with left and right. Each map plays its
+own music, synthesised from the cartridge's channel data through a Game Boy
+sound chip written from the hardware specification. F5 saves, and the
 bag, your money and the dex go with it; a save is loaded automatically.
 
 Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-723 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+732 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`, and a further 18 run when a second,
-deliberately wrong cartridge is supplied — 741 in all. Nothing is claimed to be
+deliberately wrong cartridge is supplied — 750 in all. Nothing is claimed to be
 correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these
