@@ -2480,6 +2480,141 @@ local function test_storage(base_stats)
   check_equal("at the right level", restored:box(5)[1].level, 70)
 end
 
+-- The channel command language, borrowed and then checked.
+--
+-- The widths come from the pokecrystal audio macros, the way the script opcode
+-- widths did. What matters here is how far the cartridge can confirm them, and
+-- the answer is "from above only" — which is worth asserting precisely, because
+-- the obvious reading of a perfect score is wrong.
+local function test_music_ops(rom)
+  log("\n== channel command widths ==")
+
+  local music = require("src.rom.music")
+  local music_ops = require("src.rom.music_ops")
+
+  local located = music.locate(rom)
+  if not located then
+    log("  SKIP  the music table did not locate")
+    return
+  end
+
+  local extents = {}
+  for _, song in ipairs(located.songs) do
+    if not song.unparsed then
+      for index = 1, song.count - 1 do
+        local from = song.bank * 0x4000 + (song.channels[index] - 0x4000)
+        local to = song.bank * 0x4000 + (song.channels[index + 1] - 0x4000)
+        if to > from and to - from < 4096 then
+          extents[#extents + 1] = { from = from, to = to, channel = index }
+        end
+      end
+    end
+  end
+
+  -- Both measures, for a given width table.
+  local function measure(overrides)
+    local landed, starts, targets = 0, {}, {}
+    for _, extent in ipairs(extents) do
+      local walk = music_ops.walk(rom, extent.from, extent.to, extent.channel,
+        overrides)
+      if walk.landed then
+        landed = landed + 1
+      end
+      for offset in pairs(walk.starts or {}) do
+        starts[offset] = true
+      end
+      local bank = math.floor(extent.from / 0x4000)
+      for _, address in ipairs(walk.targets or {}) do
+        targets[#targets + 1] = { address = address, bank = bank }
+      end
+    end
+    local resolved = 0
+    for _, target in ipairs(targets) do
+      if target.address >= 0x4000 and target.address <= 0x7FFF then
+        local flat = target.bank * 0x4000 + (target.address - 0x4000)
+        if starts[flat] then
+          resolved = resolved + 1
+        end
+      end
+    end
+    return landed, resolved, #targets
+  end
+
+  local settled = { [music_ops.TOGGLE_NOISE] = 0,
+                    [music_ops.SFX_TOGGLE_NOISE] = 0 }
+  local landed, resolved, targets = measure(settled)
+
+  log("        %d boundaries, %d land exactly", #extents, landed)
+  log("        %d control-transfer addresses, %d resolve onto an instruction",
+    targets, resolved)
+  check_equal("every channel walks exactly onto the next one's start",
+    landed, #extents)
+  check_equal("and every address inside the streams resolves",
+    resolved, targets)
+  check("there are enough addresses for that to mean something", targets > 500)
+
+  -- The degeneracy, asserted so the measure cannot be adopted again by someone
+  -- who has not read why it fails. A table where every command takes no operand
+  -- walks one byte at a time and therefore lands on *any* endpoint.
+  local zeros = {}
+  for opcode = 0xD0, 0xFF do
+    zeros[opcode] = 0
+  end
+  local zero_landed = measure(zeros)
+  check_equal("a table that says nothing lands on every boundary too",
+    zero_landed, #extents)
+
+  -- The asymmetry, which is the real result and the reason the perfect score
+  -- above is not the confirmation it looks like.
+  --
+  -- Make a common command one byte *wider* and the walk swallows a real
+  -- instruction, desynchronises, and the addresses stop resolving. Make it one
+  -- byte *narrower* and nothing at all changes: the operand is read as an
+  -- opcode instead of stepped over, operand bytes are almost always below $D0,
+  -- below $D0 is a note, and a note is one byte. Skipping the byte and playing
+  -- it cost the walk the same distance.
+  local envelope = 0xDC
+  local wider = {}
+  local narrower = {}
+  for key, value in pairs(settled) do
+    wider[key], narrower[key] = value, value
+  end
+  wider[envelope] = 2
+  narrower[envelope] = 0
+
+  local wide_landed, wide_resolved, wide_targets = measure(wider)
+  local narrow_landed, narrow_resolved, narrow_targets = measure(narrower)
+
+  log("        one byte wider:    %d land, %d of %d addresses resolve",
+    wide_landed, wide_resolved, wide_targets)
+  log("        one byte narrower: %d land, %d of %d addresses resolve",
+    narrow_landed, narrow_resolved, narrow_targets)
+
+  check("a width one byte too large is caught by the addresses",
+    wide_resolved < wide_targets)
+  check_equal("but one byte too small changes nothing the cartridge can see",
+    narrow_resolved, narrow_targets)
+  check_equal("not even the boundaries", narrow_landed, #extents)
+
+  -- And how much of the table the corpus exercises at all.
+  local counts = {}
+  for _, extent in ipairs(extents) do
+    local walk = music_ops.walk(rom, extent.from, extent.to, extent.channel,
+      settled)
+    for opcode, times in pairs(walk.counts or {}) do
+      if opcode >= music_ops.FIRST_COMMAND then
+        counts[opcode] = (counts[opcode] or 0) + times
+      end
+    end
+  end
+  local used = 0
+  for _ in pairs(counts) do
+    used = used + 1
+  end
+  log("        %d of 48 commands appear anywhere in the corpus", used)
+  check("most of the table is never exercised by this cartridge", used < 32)
+end
+
 -- The sound chip.
 --
 -- A sound chip has a failure mode nothing else here has: **it makes a noise
@@ -5406,6 +5541,7 @@ function harness.run(rom_path, report_path, other_rom)
       found and found.item_names and found.item_names.records)
     test_sav(found and found.base_stats and found.base_stats.records)
     test_music(rom)
+    test_music_ops(rom)
     test_movement(rom, map_result)
     test_script_vm(rom, map_result)
     test_hidden_items(rom, map_result,

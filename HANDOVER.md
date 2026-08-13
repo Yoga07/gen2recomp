@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 54 commits in, 708 tests passing
-against Crystal and none failing — 726 with a second, deliberately wrong
+Written at commit `6db0197` and updated since, 55 commits in, 716 tests passing
+against Crystal and none failing — 734 with a second, deliberately wrong
 cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
@@ -56,7 +56,7 @@ love . --shot <png> <mode>
 love . --probe-<name> <rom> <report> [extra]
 ```
 
-There are 38 probes. They are diagnostics kept from each investigation, not
+There are 39 probes. They are diagnostics kept from each investigation, not
 tests — `--probe-vm`, `--probe-channels`, `--probe-terrain` and `--probe-time`
 are the ones most likely to be useful again. `--shot <mode>` renders one frame
 of the running game and exits; the modes are listed in `main.lua` and cover
@@ -85,6 +85,13 @@ layout can be looked at rather than whichever one the demo picks.
    dump sets are full of them — `Pokemon Red (UE)[!].gb` — so a plain
    `Test-Path` reports a file that is plainly there as missing. `scripts\test.ps1`
    uses `-LiteralPath` throughout. Same family as trap 1.
+5. **`Get-Content -Raw` piped into `Set-Content` destroys UTF-8.** PowerShell 5.1
+   reads as the ANSI codepage unless told otherwise, so every em dash and
+   accented letter comes back as three Latin-1 characters and is then written
+   out as UTF-8 again — double encoded, plus a BOM on the front. These files are
+   full of both. Edit them with a tool that round-trips UTF-8; if a shell
+   rewrite is unavoidable, pass `-Encoding UTF8` to *both* ends. `git diff`
+   catches it immediately, which is the reason to look before committing.
 
 ---
 

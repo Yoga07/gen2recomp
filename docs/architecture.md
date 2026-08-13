@@ -1462,13 +1462,15 @@ The hill-climb has **not** been re-run at 256 extents. There would be little
 point: what defeats it is that width zero is admissible, which no amount of
 extra data changes. What *would* change the picture is a width table proposed
 from outside — from the disassembly the script opcodes were already taken from,
-or from an emulator's writes to the sound registers. **The extent measure is
-vacuous as a search objective and perfectly sound as a test of a fixed
-hypothesis**: a table supplied from elsewhere either walks all 256 extents
-exactly or it does not, and unlike a search it cannot bend itself to fit. That
-is the same shape as the script opcodes, where inference reported zero overruns
-while getting 13 of 24 widths wrong, and the real widths made the number mean
-something again.
+or from an emulator's writes to the sound registers.
+
+> **This paragraph used to claim** that the extent measure is "vacuous as a
+> search objective and perfectly sound as a test of a fixed hypothesis",
+> because a table from elsewhere cannot bend itself to fit. That was wrong, and
+> the section below is what disproved it. The measure is bounded from one side
+> only: it catches a width that is too large and is blind to a width that is
+> too small. It was a comfortable-sounding claim that nobody had measured,
+> which is the failure this document exists to keep a list of.
 
 ### What does stand
 
@@ -1487,6 +1489,64 @@ Getting further needs a different kind of evidence than byte layout: an emulator
 to watch the sound registers, or the note pitches recovered by ear against a
 recording. Neither is bytecode archaeology, which is what this project is set up
 to do.
+
+### Borrowing the width table, and what the cartridge can check of it
+
+The widths were taken from the pokecrystal audio macros, exactly as the script
+opcode table was: a number per opcode, nothing vendored, and every borrowed
+number then put to the cartridge. Reading the macros mattered — a summary of
+them got `pitch_slide` wrong at three operand bytes where the macro writes two,
+and put an operand on the octave commands, which encode the octave in the opcode
+itself and carry nothing.
+
+Against the 256 channel boundaries the table scores **256 of 256**, and every
+one of the **1045** addresses carried by `sound_call`, `sound_loop` and
+`sound_jump` lands both inside the `$4000`–`$7FFF` window and exactly on a byte
+the walk reached as the start of an instruction.
+
+That reads like a complete confirmation and it is not one, which is the part
+worth keeping.
+
+#### The measure is bounded from above only
+
+Change any width by one and re-measure. The two directions do entirely
+different things:
+
+| | addresses resolving |
+|---|---|
+| the borrowed table | 1045 of 1045 |
+| `volume_envelope` one byte **wider** | 950 of 967 |
+| `volume_envelope` one byte **narrower** | **1045 of 1045** |
+
+A width that is too large swallows a real instruction, the walk desynchronises,
+and the addresses stop resolving — caught for 9 of the 21 commands the corpus
+uses, including every common one.
+
+A width that is too small changes **nothing the cartridge can see**, and the
+reason is structural rather than a shortage of evidence. Drop a width by one
+and the operand byte is read as an opcode instead of being stepped over.
+Operand bytes are almost always below `$D0`. Below `$D0` is a note. A note is
+one byte. **Skipping the byte and playing it cost the walk exactly the same
+distance**, so every position-based measure — boundaries, pointers, anything —
+sees an identical parse.
+
+So the cartridge bounds each width from above and says nothing whatever from
+below. The table is *consistent* with this cartridge and *not confirmed* by it,
+and the difference matters: a width that is really smaller would decode a
+spurious note where an operand should be, which is inaudible to a walk and very
+audible in playback.
+
+This is the same degeneracy that made the hill-climb worthless, in a sharper
+form. It was previously written down here as "width zero is admissible". It is
+worse than that: **any width is confusable with one less than itself**, whenever
+the operand happens to be a note — which is nearly always.
+
+#### What the corpus does not reach at all
+
+**27 of the 48 commands never appear in any channel.** Their widths are borrowed
+and untested here by any means. The 21 that do appear account for 11,126
+instructions, so the parse as a whole is exercised heavily; it is the tail of
+the table that is on trust.
 
 ## The sound chip
 
