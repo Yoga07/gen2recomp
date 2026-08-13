@@ -42,6 +42,7 @@ function music.load(game_id)
   if not encoded then
     return nil, "no music banks in the cache; re-import"
   end
+  local effects = cache.read(game_id, "sfx") or {}
 
   -- Hex back to bytes, once, at load.
   local banks = {}
@@ -53,6 +54,7 @@ function music.load(game_id)
 
   local instance = setmetatable({
     songs = songs,
+    effects = effects,
     banks = banks,
     apu = apu_module.new(music.RATE),
     playing = nil,
@@ -62,13 +64,20 @@ function music.load(game_id)
 
   -- The sequencer reads through this rather than from an image, because the
   -- engine holds a handful of banks and not a cartridge.
-  instance.sequencer = sequencer.new(function(offset)
+  local function read(offset)
     local bank = banks[math.floor(offset / 0x4000)]
     if not bank then
       return nil
     end
     return string.byte(bank, (offset % 0x4000) + 1)
-  end, instance.apu)
+  end
+
+  instance.sequencer = sequencer.new(read, instance.apu)
+  -- A second sequencer for sound effects, sharing the chip. That sharing is
+  -- the point rather than a shortcut: an effect and a song both drive the same
+  -- four channels, so an effect using the second square wave takes it away
+  -- from the tune for as long as it lasts, which is what the hardware does.
+  instance.effect = sequencer.new(read, instance.apu)
 
   return instance
 end
@@ -110,6 +119,28 @@ function music:play(index)
   return true
 end
 
+--- Play a sound effect over whatever is already playing.
+-- @return true when the effect exists and started
+function music:play_sound(id)
+  local entry = self.effects[(id or -1) + 1]
+  if not entry or entry.unparsed then
+    return false
+  end
+
+  local channels = {}
+  for slot, address in ipairs(entry.channels or {}) do
+    channels[slot] = entry.bank * 0x4000 + (address - 0x4000)
+  end
+  if #channels == 0 then
+    return false
+  end
+
+  -- Not an APU reset: the music is still going and resetting would cut it off.
+  self.effect:play(channels, entry.bank, entry.channel)
+  self.effect_playing = true
+  return true
+end
+
 function music:stop()
   self.playing = nil
   self.finished = true
@@ -127,6 +158,12 @@ function music:render(count)
 
   while written < count do
     if self.frame_debt <= 0 then
+      -- The effect ticks after the song, so on any channel they both want the
+      -- effect's register writes are the ones that land. It stops on its own
+      -- and the tune takes the channel back at its next note.
+      if self.effect_playing and not self.effect:frame() then
+        self.effect_playing = false
+      end
       if self.finished or not self.sequencer:frame() then
         self.finished = true
         -- Silence for whatever is left, so the caller always gets a full

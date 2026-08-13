@@ -159,6 +159,50 @@ function probe.run(rom_path, report_path, which)
   end
   log("  in %s", love.filesystem.getSaveDirectory())
 
+  -- A song with sound effects fired over it, which is the thing that cannot be
+  -- checked any way but listening: an effect has to interrupt the channel it
+  -- uses and hand it back, and either of those going wrong sounds obviously
+  -- broken while measuring nothing.
+  log("\n== a song with effects over it ==")
+  do
+    local music_engine = require("src.engine.music")
+    local cache = require("src.import.cache")
+    local game_id
+    for _, entry in ipairs(cache.list_games()) do
+      if entry.current then
+        game_id = entry.game
+      end
+    end
+
+    local player = game_id and music_engine.load(game_id)
+    if not player then
+      log("  SKIP  no current import in the cache")
+    else
+      player:play(12)
+      local chosen = {}
+      for slot, entry in ipairs(player.effects) do
+        if not entry.unparsed and #chosen < 6 then
+          chosen[#chosen + 1] = slot - 1
+        end
+      end
+
+      local out = {}
+      for step = 1, 8 do
+        if chosen[step] then
+          player:play_sound(chosen[step])
+        end
+        for _, sample in ipairs(player:render(math.floor(probe.RATE * 0.9))) do
+          out[#out + 1] = sample
+        end
+      end
+
+      love.filesystem.write("dump/audio/song_with_effects.wav",
+        wav(out, probe.RATE))
+      log("  song 12 with effects %s fired over it -> " ..
+        "dump/audio/song_with_effects.wav", table.concat(chosen, ", "))
+    end
+  end
+
   -- How much of the width table has an ear actually had a chance to check?
   --
   -- Widths are bounded from above by the byte layout and from below only by

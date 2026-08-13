@@ -2024,6 +2024,13 @@ function game:script_play_music(song)
   end
 end
 
+--- A script making a noise.
+function game:script_play_sound(sound)
+  if self.music then
+    self.music:play_sound(sound)
+  end
+end
+
 function game:script_money()
   return self.money
 end

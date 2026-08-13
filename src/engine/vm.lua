@@ -545,20 +545,29 @@ function VM:step()
     return
   end
 
-  -- Music. The song table is located and the sequencer can play it, so this
-  -- stops being ignored: a script that changes the music now changes it.
+  -- Music and sound effects. Both tables are located and the sequencer can play
+  -- either, so neither is ignored any more.
   --
-  -- Its sibling `playsound` does not, and the reason is worth keeping. Sound
-  -- effects are indexed separately — their operands run past the end of the
-  -- song table, up to 202 against 103 slots — so they name a table this project
-  -- has not located. `cry` likewise takes a species id and needs cry data that
-  -- has not been found. Both stay ignored rather than being pointed at the
-  -- wrong table, which would play an arbitrary tune every time somebody opened
-  -- a door.
+  -- `cry` still is. It takes a species number, and Gen 2 gives each species a
+  -- base cry plus a pitch and a length, so it indexes something with that shape
+  -- rather than a table of headers — which is why scoring every offset in the
+  -- cartridge against the ids `cry` asks for finds nothing that explains them
+  -- all, where `playsound` had exactly one answer. Pointing it at the effect
+  -- table would make every Pokémon shout something arbitrary.
   if op == "playmusic" and self.host and self.host.script_play_music then
     local song = instruction.args and instruction.args[1]
     if song then
       self.host:script_play_music(song)
+    end
+    self.performed = (self.performed or 0) + 1
+    self:advance()
+    return
+  end
+
+  if op == "playsound" and self.host and self.host.script_play_sound then
+    local sound = instruction.args and instruction.args[1]
+    if sound then
+      self.host:script_play_sound(sound)
     end
     self.performed = (self.performed or 0) + 1
     self:advance()

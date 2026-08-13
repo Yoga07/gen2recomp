@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 58 commits in, 732 tests passing
-against Crystal and none failing — 750 with a second, deliberately wrong
+Written at commit `6db0197` and updated since, 60 commits in, 738 tests passing
+against Crystal and none failing — 756 with a second, deliberately wrong
 cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
@@ -146,21 +146,21 @@ code path.
 The extraction is close to complete: species, moves, stats, learnsets,
 evolutions, sprites, palettes, tilesets, 388 maps, events, text, font,
 encounters, 541 trainers, 255 items, 34 marts, 178 item balls, 85 hidden items,
-57 machines, 100 songs, 251 Pokédex entries, 14 status cures, and 14558 decoded
-script instructions.
+57 machines, 100 songs, 207 sound effect slots, 251 Pokédex entries, 14 status
+cures, and 14558 decoded script instructions.
 
 The engine plays: overworld, warps, connections, wild and trainer battles,
 catching, experience and levelling, evolution, fainting and blackout, switching,
 the bag in and out of battle, shops, the script interpreter with yes/no prompts,
 Surf, Cut, Strength, Whirlpool, storage boxes, the clock, the Pokédex, status
-cures, and reading a real `.sav`.
+cures, music on every map with sound effects over it, and reading a real `.sav`.
 
 ### What is left, and what is in the way
 
 | | state |
 |---|---|
 | Badges | tracked and gated, but nothing awards them |
-| Sound effects and cries | two tables located; what indexes them is not |
+| Cries | `cry` indexes something that is not a table of headers |
 | `special` routines | 127 of them, assembly, not runnable from bytecode |
 | Unown's 26 forms | pic table locator does not find them |
 
@@ -216,18 +216,23 @@ problems and only one of them is the wall:
    share subroutines; a test asserts a song rendered from the cache is sample
    for sample identical to the same song rendered from the cartridge.
    `playsound` ×189 and `cry` ×70 are **still ignored on purpose**.
-6. **Sound effects and cries.** Half done, and the half that is done is worth
-   reading `--probe-audio` for. The song locator insists a header opens on
-   channel 0, which every song does and no sound effect does — Gen 2 drives the
-   four hardware channels from two sets of slots and effects use the second.
-   Relaxing that one condition finds, directly after the song table: an inline
-   4-channel header, then **38 pointers into bank `$3C` whose addresses climb by
-   exactly 9** (three channel entries, so a uniform block of small three-channel
-   sounds), then at `0x0E927C` **pointers to headers opening on channels 4–7**.
-   What is *not* established is the indexing: the scripts ask for sound ids up
-   to 202 and the channel-4 table reaches 77, and the 38-entry block is only
-   *shaped* like the cries. Do not wire either up on the strength of that — a
-   wrong table here plays a plausible noise rather than failing.
+6. **Sound effects.** Done. The table is at `0x0E927C`, 207 slots, and
+   `playsound` indexes it directly from zero. It was invisible because the song
+   locator insists a header opens on channel 0, which every song does and no
+   effect does — Gen 2 drives the four hardware channels from two sets of slots
+   and effects use the second. The id mapping was settled by scoring **every**
+   offset in the cartridge against the ids the scripts ask for: exactly one
+   explains all 32, and running the same scan on `playmusic`, whose answer was
+   already known, puts the song table top and so validates the method.
+7. **Cries.** Not done, and the same scan says why: **no** offset explains the
+   47 ids `cry` asks for, the best being a four-way tie at 36, which is noise
+   rather than a near miss. A cry takes a species number and Gen 2 gives each
+   species a base cry plus a pitch and a length, so it indexes something of that
+   shape rather than a table of headers. Between the song table and the effect
+   table sit 38 pointers into bank `$3C` whose addresses climb by exactly 9 —
+   a uniform block of small three-channel sounds, which is what the base cries
+   would look like. **That is a resemblance, not a finding.** What is missing is
+   the per-species table pointing into it.
 
 ### The one unverified claim
 

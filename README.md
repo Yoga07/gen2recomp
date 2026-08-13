@@ -74,6 +74,9 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Game Boy sound chip | working — measured against the hardware, and heard |
 | **Engine:** music sequencer | working — 99 of 100 songs play, and sound right |
 | **Engine:** music while you play | working — each map plays its own tune |
+| Sound effect table | working — 207 slots, found behind the songs |
+| **Engine:** sound effects | working — scripts play them over the music |
+| Cries | not located — `cry` indexes something else; see docs |
 | Reading real .sav files | working — read from a real Crystal save |
 | **Engine:** map edge connections | working — 142 crossings |
 | **Engine:** trainer battles | working — 518 trainers across 57 classes |
@@ -104,9 +107,9 @@ Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-732 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+738 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`, and a further 18 run when a second,
-deliberately wrong cartridge is supplied — 750 in all. Nothing is claimed to be
+deliberately wrong cartridge is supplied — 756 in all. Nothing is claimed to be
 correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these
@@ -130,6 +133,8 @@ itself and does not depend on them:
 | Trainer parties | `0x039A1F` | `$0E` |
 | Pokédex entry pointers | `0x044378` | `$11` |
 | Status cures | `0x00F071` | `$03` |
+| Music table | `0x0E906E` | `$3A` |
+| Sound effect table | `0x0E927C` | `$3A` |
 
 ## Requirements
 

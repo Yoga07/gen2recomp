@@ -26,6 +26,7 @@ local music = require("src.rom.music")
 local machines = require("src.rom.machines")
 local obstacles = require("src.rom.obstacles")
 local whirlpool = require("src.rom.whirlpool")
+local sfx = require("src.rom.sfx")
 local learnsets = require("src.rom.learnsets")
 local dex = require("src.rom.dex")
 local cures = require("src.rom.cures")
@@ -408,6 +409,34 @@ function importer.run(path, progress)
     end
     music_summary.banks = #order
     cache.write(descriptor.game, "music_banks", encoded)
+
+    -- The sound effects, which live behind the songs and open on the second
+    -- set of channel slots.
+    local sfx_result, sfx_err = sfx.locate(rom)
+    if not sfx_result then
+      failed.sfx = sfx_err
+    else
+      offsets.sfx = sfx_result.offset
+      music_summary.sfx = sfx_result.count
+      music_summary.sfx_decoded = sfx_result.decoded
+      cache.write(descriptor.game, "sfx", sfx_result.entries)
+
+      -- Effects sit in banks of their own, so the engine needs those too.
+      local extra = {}
+      for _, entry in ipairs(sfx_result.entries) do
+        if not entry.unparsed and not encoded[tostring(entry.bank)]
+          and not extra[entry.bank] then
+          extra[entry.bank] = true
+          local raw = rom:read(entry.bank * 0x4000, 0x4000)
+          local hex = {}
+          for at = 1, #raw do
+            hex[at] = ("%02X"):format(raw:byte(at))
+          end
+          encoded[tostring(entry.bank)] = table.concat(hex)
+        end
+      end
+      cache.write(descriptor.game, "music_banks", encoded)
+    end
   end
 
   -- The font, so the engine can draw text in the cartridge's own letters.

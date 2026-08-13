@@ -1857,17 +1857,56 @@ A step of exactly nine is three channel entries, so that middle table points at
 three-channel headers stored back to back rather than scattered — a uniform
 block of small sounds.
 
-**What this does not establish**, and the distinction is the point. That the
-channel-4 table is what `playsound` indexes is *not* shown: the scripts ask for
-sound ids up to 202 and this reaches 77. What the 38-entry block is, is not
-shown either — a uniform run of small three-channel sounds is what the cries
-would look like, and "is what X would look like" is the kind of reasoning this
-document keeps a list of. Neither is wired up, because pointing `playsound` at a
-table whose indexing has not been worked out would play an arbitrary noise
-rather than the right one, and that is a bug that sounds like a feature.
+### Scoring every offset against what the game asks for
 
-So: two more structures located, an id mapping still missing, and a validator
-whose one over-tight condition had been hiding both.
+What was missing was the arithmetic between a script's sound id and an entry in
+one of those tables. Rather than guess a base and ask whether it looked
+plausible, **every offset in the cartridge was scored** by how many of the ids
+the scripts actually use land on a real header there.
+
+The method checks itself first. `playmusic`'s answer is known independently, so
+if the scan did not put the song table top of that list, nothing it said about
+anything else would mean a thing. It does.
+
+| | ids | offsets explaining every one |
+|---|---|---|
+| `playmusic` | 15 | 4, including the song table — the control |
+| **`playsound`** | **32** | **1, at `0x0E927C`** |
+| `cry` | 47 | **0** — the best manages 36, several tied |
+
+**One offset in two megabytes explains all 32 sound ids**, and it is the
+channel-4 table. That is the mapping: `playsound` indexes it directly from
+zero, and effects are wired up.
+
+`cry` is not, and the same scan is why. No offset explains its ids, and the
+best score is a four-way tie well short of the total — which is what noise
+looks like, not a near miss. A cry takes a species number and Gen 2 gives each
+species a base cry plus a pitch and a length, so it indexes something of that
+shape rather than a table of headers. That table has not been found, and `cry`
+stays unimplemented rather than pointed at the effect table, which would make
+every Pokémon shout something arbitrary.
+
+### Two slots that decoded and should not have
+
+The effect table has 207 slots of which 175 decode, and enumerating it needed
+one thing settled that reasoning could not settle. Two slots decode as
+*first*-set headers — the shape a song has. Either effects may sometimes open
+on the music channels, or those slots are unused ones that happen to parse.
+
+Rejecting them and re-running answers it immediately, because there is a test
+that every id the scripts ask for resolves. If either of those two slots were a
+real effect, tightening would have made it unreadable and that test would have
+failed. All 32 still land, so they are noise and the tighter reading is right.
+
+The gaps needed measuring rather than assuming too. The song table tolerates
+four missing slots in a row before deciding it has ended; applying that here
+stopped at 78 entries when the scripts plainly use id 202. Mapping the gaps
+shows why and gives a bound that is not a guess: the longest run of unused
+slots **inside** the table is 17, and the run after the last real entry is 31
+and does not stop. Anything between works.
+
+So: a validator whose one over-tight condition had been hiding an entire table,
+found by asking why the search could not see what had to be there.
 
 ### The mixer was most of the cost
 

@@ -115,12 +115,18 @@ function sequencer.new(source, apu)
 end
 
 --- Start a song. `channels` is a list of flat offsets, one per channel.
-function sequencer:play(channels, bank)
+--
+-- @param first the channel slot the header opens on. Songs open on slot 0 and
+--        sound effects on slot 4, and both sets drive the same four pieces of
+--        hardware — so an effect using slot 5 is the second square wave, the
+--        same one a song's slot 1 uses. That is what makes an effect interrupt
+--        the music rather than play alongside it.
+function sequencer:play(channels, bank, first)
   self.channels = {}
   self.tempo = 256
   for index, offset in ipairs(channels) do
     self.channels[index] = {
-      number = index,
+      number = ((first or 0) + index - 1) % 4 + 1,
       pc = offset,
       bank = bank,
       playing = true,

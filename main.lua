@@ -49,6 +49,7 @@ local HEADLESS = {
   ["--probe-musicops"] = "tests.probe_musicops",
   ["--probe-pitch"] = "tests.probe_pitch",
   ["--probe-song"] = "tests.probe_song",
+  ["--probe-soundids"] = "tests.probe_soundids",
   ["--probe-terrain"] = "tests.probe_terrain",
   ["--probe-time"] = "tests.probe_time",
   ["--dump-tilesets"] = "tests.dump_tilesets",

@@ -2849,6 +2849,69 @@ local function test_game_music(rom)
     end
   end
 
+  -- Sound effects. The table is located structurally — the first long run of
+  -- pointers to headers opening on the second channel set — so what the
+  -- scripts do with it is independent evidence rather than the thing that
+  -- defined it.
+  local sfx_rom = require("src.rom.sfx")
+  local effects = sfx_rom.locate(rom)
+  if check("the sound effect table was located", effects ~= nil) then
+    log("        %d slots at 0x%06X, %d decode", effects.count, effects.offset,
+      effects.decoded)
+    check("it is long enough for the ids the scripts use", effects.count > 202)
+
+    -- Every effect opens on the second set of channel slots. That is the whole
+    -- difference between this table and the song table, and it is what the
+    -- song locator's one over-tight condition was hiding.
+    local wrong_set = 0
+    for _, entry in ipairs(effects.entries) do
+      if not entry.unparsed and entry.channel < sfx_rom.FIRST_CHANNEL then
+        wrong_set = wrong_set + 1
+      end
+    end
+    check_equal("every effect opens on the second channel set", wrong_set, 0)
+
+    -- And the scripts agree. Scoring every offset in the cartridge by how many
+    -- of the ids `playsound` asks for land on a real header, exactly one
+    -- offset explains all of them — this one.
+    local code = cache_module.read(game_id, "script_code") or {}
+    local asked, count = {}, 0
+    for _, block in pairs(code) do
+      for _, instruction in pairs(block) do
+        if instruction.op == "playsound" and instruction.args then
+          local id = (instruction.args[1] or 0)
+            + (instruction.args[2] or 0) * 256
+          if id < 256 and not asked[id] then
+            asked[id] = true
+            count = count + 1
+          end
+        end
+      end
+    end
+
+    local resolved = 0
+    for id in pairs(asked) do
+      local entry = effects.entries[id + 1]
+      if entry and not entry.unparsed then
+        resolved = resolved + 1
+      end
+    end
+    log("        the scripts ask for %d distinct effects", count)
+    check_equal("every effect the scripts ask for is in the table",
+      resolved, count)
+
+    -- The engine can play one over the music without stopping it.
+    player:play(12)
+    local id
+    for slot, entry in ipairs(effects.entries) do
+      if not entry.unparsed and not id then
+        id = slot - 1
+      end
+    end
+    check("the engine plays a sound effect", player:play_sound(id))
+    check_equal("and the music is still playing underneath", player.playing, 12)
+  end
+
   -- And it actually makes a sound.
   player:play(12)
   local loud = 0
