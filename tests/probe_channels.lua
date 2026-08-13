@@ -51,7 +51,9 @@ function probe.run(rom_path, report_path)
   -- begins. The last channel of each song has no known end, so it is left out.
   local extents = {}
   for _, song in ipairs(located.songs) do
-    for index = 1, song.count - 1 do
+    -- Slots that do not decode are kept in the table so the indices after them
+    -- stay put; they carry no channels to measure.
+    for index = 1, (song.unparsed and 0 or song.count) - 1 do
       local from = song.bank * 0x4000 + (song.channels[index] - 0x4000)
       local to = song.bank * 0x4000 + (song.channels[index + 1] - 0x4000)
       if to > from and to - from < 4096 then

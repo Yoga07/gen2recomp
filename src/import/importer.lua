@@ -375,6 +375,7 @@ function importer.run(path, progress)
   else
     offsets.music = music_result.offset
     music_summary.count = music_result.count
+    music_summary.decoded = music_result.decoded
     music_summary.exact = music_result.exact
     cache.write(descriptor.game, "music", music_result.songs)
   end
@@ -854,8 +855,9 @@ function importer.format_report(report)
   end
 
   if report.music and report.music.count > 0 then
-    lines[#lines + 1] = ("  %-16s %4d songs, %d headers closing exactly")
-      :format("music", report.music.count, report.music.exact)
+    lines[#lines + 1] = ("  %-16s %4d slots, %d decode, %d closing exactly")
+      :format("music", report.music.count, report.music.decoded or 0,
+        report.music.exact)
   end
 
   if report.marts and report.marts.count > 0 then

@@ -1353,42 +1353,87 @@ confirms one is that **the header ends exactly where its first channel begins**:
 the entries are contiguous with the data they point at, so the arithmetic has to
 close.
 
-The table holds **59 songs**, spread across banks `$3A`, `$3B` and `$3D` — which
-is why the first search found only 10. It required every entry to name the same
-bank, the sharpening that had worked for the standard scripts, and music does
-not fit in one bank. Reading the bank per entry and then walking backwards from
-the run, the way the standard-script table needed, gives the whole thing.
+The table is spread across banks `$3A`, `$3B` and `$3D` — which is why the first
+search found only 10. It required every entry to name the same bank, the
+sharpening that had worked for the standard scripts, and music does not fit in
+one bank. Reading the bank per entry and then walking backwards from the run,
+the way the standard-script table needed, gives the front of it.
 
-Of the 59, **52 close exactly**. The other seven are short by one byte — and by
-*exactly* one byte, every time, with no other value appearing. That uniformity is
-the useful part: a scattered mismatch would mean the shape was wrong, while a
-single repeated offset means the shape is right and there is one padding
-convention here that has not been identified. It is flagged rather than rounded
-off, and there is a test that the mismatches stay uniform.
+### It was truncated at 59, and the scripts said so
 
-Channel counts come out at one song with two channels, 24 with three and 34 with
-four, and every song's channel pointers climb in order.
+The next version of this said the table held **59 songs**, and it did not. It
+stopped at the first slot that failed to decode — the same mistake the trainer
+class table made, and the map headers made before that.
+
+What caught it was the game asking for something that was not there.
+`playmusic` names a song by index, and across every decoded script the operands
+include **78, 93, 96 and 97**, all past the end of a 59-entry table. A table
+that the game itself indexes past the end of is not the whole table.
+
+Walking straight on past the break finds it continues to index 102, with only
+**three** slots in between that do not decode — 59, 78 and 91, each an isolated
+single miss. Index 103 names bank `$C0`, which this cartridge does not have, and
+nothing decodes for a long way after. The table is **103 slots**, of which 100
+decode.
+
+The entries past the break were checked before being believed, against
+properties measured from the original 59 that the new ones took no part in
+establishing:
+
+| | first 59 | past the break |
+|---|---|---|
+| channels | 210 | 149 |
+| bytes below `$D0` | 73% | 73% |
+| channels opening with a byte the first 59 used | — | **147 of 149** |
+
+Same data, and the table had simply been cut short. That also nearly doubles the
+material available to anyone attacking the channel bytecode: **256 channel
+extents rather than 148**.
+
+Slots that do not decode are kept as placeholders, for the reason the map
+headers needed the same treatment: **entries are addressed by position**.
+Dropping one would not merely lose a song, it would shift every song after it
+and silently rewire which music plays where.
+
+Of the 100 that decode, **89 close exactly**. The other eleven are short by one
+byte — and by *exactly* one byte, every time, with no other value appearing.
+That uniformity is the useful part: a scattered mismatch would mean the shape
+was wrong, while a single repeated offset means the shape is right and there is
+one padding convention here that has not been identified. It is flagged rather
+than rounded off, and there is a test that the mismatches stay uniform.
+
+Channel counts come out at two songs with two channels, 37 with three and 61
+with four, and every song's channel pointers climb in order.
+
+The general lesson is the one this document has now recorded three times, and
+the new part is how it was caught. A locator that stops at the first awkward
+entry produces a table that is *internally* consistent — every entry in it is
+real — so nothing about the table itself complains. What complains is another
+part of the cartridge indexing past its end. **When one structure names
+positions in another, that naming is a bounds check nobody has to write.**
 
 ### The channel bytecode: a negative result
 
 Channel data is contiguous — channel 1 runs up to where channel 2 begins — so
-the boundaries are known for 148 channels across the 59 songs. That is exactly
-the lever that validated the script opcode widths: a walk has to land on the
-boundary, never over and never short, and 148 of them have to agree at once.
+the boundaries are known for **256 channels** across the 100 songs that decode.
+That is exactly the lever that validated the script opcode widths: a walk has to
+land on the boundary, never over and never short, and all of them have to agree
+at once.
 
 **It does not work here, and the reason is worth writing down.**
 
 With every command one byte wide, a walk consumes one byte at a time and lands
-on the boundary every single time. A table of all zeros scores 148 out of 148.
+on the boundary every single time. A table of all zeros scores 256 out of 256.
 The measure cannot tell a correct width table from a table that says nothing,
 which is the same vacuousness that got the script widths wrong on the first
 attempt — there it was marking every opcode as terminating, so a walk could
 never overrun; here it is allowing width zero, so a walk can never drift.
 
-Adding a second constraint did not rescue it. `$FF` is what 89 of the 148
-channels end on, so under a correct parse it should only be met at the end, and
-every earlier one is a byte that should have been swallowed as somebody's
-operand. Scoring that too, and hill-climbing from four random starts:
+Adding a second constraint did not rescue it. `$FF` is what most channels end
+on, so under a correct parse it should only be met at the end, and every earlier
+one is a byte that should have been swallowed as somebody's operand. Scoring
+that too, and hill-climbing from four random starts — this was run against the
+148 extents the truncated table gave, and the scores below are that run's:
 
 | run | score | widths |
 |---|---|---|
@@ -1407,18 +1452,36 @@ The restart-agreement check is the only reason this was caught rather than
 shipped, and it is worth reaching for whenever a search is doing the deciding.
 The degeneracy is now asserted in the test suite — a table of zeros satisfying
 the extents completely is a *passing* test — so the measure cannot be adopted
-again by someone who has not read this.
+again by someone who has not read this. That assertion is computed from
+whatever the table currently yields, so widening it from 148 extents to 256
+re-checked the degeneracy rather than leaving a stale number behind: more
+evidence does not help, because the flaw is in the measure and not in the
+sample size.
+
+The hill-climb has **not** been re-run at 256 extents. There would be little
+point: what defeats it is that width zero is admissible, which no amount of
+extra data changes. What *would* change the picture is a width table proposed
+from outside — from the disassembly the script opcodes were already taken from,
+or from an emulator's writes to the sound registers. **The extent measure is
+vacuous as a search objective and perfectly sound as a test of a fixed
+hypothesis**: a table supplied from elsewhere either walks all 256 extents
+exactly or it does not, and unlike a search it cannot bend itself to fit. That
+is the same shape as the script opcodes, where inference reported zero overruns
+while getting 13 of 24 widths wrong, and the real widths made the number mean
+something again.
 
 ### What does stand
 
-- 148 channel extents, 28033 bytes, **72% of them below `$D0`**, consistent with
-  notes being pitch and length packed into one byte.
+- 256 channel extents, **73% of their bytes below `$D0`**, consistent with
+  notes being pitch and length packed into one byte. (This read 148 extents and
+  72% before the table turned out to be truncated at 59 of its 103 slots.)
 - 44 distinct command bytes, heavily concentrated: `$DC`, `$D5`, `$D4` and `$D6`
   are half of all commands between them.
 - A channel opens with one of **only six** bytes — `$DA`, `$DB`, `$EF`, `$E1`,
   `$D8`, `$D9` — which is what setting up an instrument before playing looks
   like.
-- 89 of 148 channels end on `$FF`.
+- most channels end on `$FF` — 89 of the 210 in the first 59 songs, and 57 of
+  the 149 in the slots the truncation had been hiding.
 
 Getting further needs a different kind of evidence than byte layout: an emulator
 to watch the sound registers, or the note pitches recovered by ear against a

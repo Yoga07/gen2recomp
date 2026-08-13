@@ -69,7 +69,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** the Pokédex | working — seen and caught, list and detail |
 | **Engine:** storage boxes | working — 14 boxes of 20 |
 | **Engine:** day/night clock | working — encounters and scripts |
-| Music table | located — 59 songs, 148 channels |
+| Music table | located — 103 slots, 100 songs, 256 channel extents |
 | Channel bytecode | not solved — see the negative result in docs |
 | Audio playback | not started — needs a Game Boy sound chip |
 | Reading real .sav files | working — read from a real Crystal save |
@@ -100,9 +100,9 @@ Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-691 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+693 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`, and a further 18 run when a second,
-deliberately wrong cartridge is supplied — 709 in all. Nothing is claimed to be
+deliberately wrong cartridge is supplied — 711 in all. Nothing is claimed to be
 correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these

@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 52 commits in, 691 tests passing
-against Crystal and none failing — 709 with a second, deliberately wrong
+Written at commit `6db0197` and updated since, 53 commits in, 693 tests passing
+against Crystal and none failing — 711 with a second, deliberately wrong
 cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
@@ -106,7 +106,8 @@ here. Examples that all nearly shipped:
 
 - The hidden-item reading scored 74 of 85 — and chance was 74 of 85, because
   87% of byte values name a real item.
-- The channel bytecode's extent measure gave 148 of 148 for a table of *zeros*.
+- The channel bytecode's extent measure gives a perfect score to a table of
+  *zeros* — 148 of 148 when it was found, 256 of 256 now.
 - A cut tree "gated a path" 62% of the time; rendering showed a wall line, and
   a wall has floor on both sides of every cell.
 - The obstacle detector's first answer was the Pokémon Centre nurse.
@@ -132,7 +133,7 @@ code path.
 The extraction is close to complete: species, moves, stats, learnsets,
 evolutions, sprites, palettes, tilesets, 388 maps, events, text, font,
 encounters, 541 trainers, 255 items, 34 marts, 178 item balls, 85 hidden items,
-57 machines, 59 songs, 251 Pokédex entries, 14 status cures, and 14558 decoded
+57 machines, 100 songs, 251 Pokédex entries, 14 status cures, and 14558 decoded
 script instructions.
 
 The engine plays: overworld, warps, connections, wild and trainer battles,
@@ -154,6 +155,28 @@ The last four are walls, each documented with what was tried. **Do not attack
 them by guessing.** If a new session wants one of them, the honest routes are:
 an emulator to watch registers (audio, specials), or a Gold/Silver ROM to
 cross-check the extraction.
+
+Audio is the one worth reading the notes on before starting, because it is four
+problems and only one of them is the wall:
+
+1. **The tables.** The music table is done — 103 slots, 100 songs, 256 channel
+   extents. It read 59 until the scripts were noticed indexing past its end.
+2. **The channel bytecode.** The wall. The extent measure is degenerate as a
+   *search objective* — width zero is admissible, so a table of zeros scores
+   perfectly — but it is a perfectly good *test of a fixed hypothesis*. A width
+   table proposed from outside, from the disassembly the script opcodes already
+   came from or from an emulator's writes to `$FF10`–`$FF3F`, either walks all
+   256 extents exactly or does not, and cannot bend itself to fit. That is the
+   route, and it is the same one the script opcodes took.
+3. **The sound chip.** Not started and **not blocked** by any of the above: four
+   channels, a frame sequencer, mixing, resampling into a queueable source. It
+   is the largest single code item left in the project and carries no research
+   risk — it can be written and tested against a synthetic tone before anything
+   about the bytecode is known.
+4. **Wiring it in.** Small. `playsound` ×189, `playmusic` ×79, `cry` ×70 and
+   `waitsfx` ×85 are currently in the interpreter's ignored list, and map
+   headers already name a music id. `cry` operands run to 250, so they are
+   species ids rather than indices into a cry table.
 
 ### The one unverified claim
 

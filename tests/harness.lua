@@ -3705,25 +3705,43 @@ local function test_music(rom)
     return
   end
 
-  log("        %d songs at 0x%06X, %d headers end exactly where their first " ..
-    "channel begins", result.count, result.offset, result.exact)
+  log("        %d slots at 0x%06X, %d decode, %d end exactly where their " ..
+    "first channel begins", result.count, result.offset, result.decoded,
+    result.exact)
 
   check("Crystal has dozens of songs", result.count >= 40
     and result.count <= 200, ("%d"):format(result.count))
+
+  -- The table used to stop at the first slot that did not decode, and reported
+  -- 59. The scripts said otherwise: `playmusic` asks for music 78, 93, 96 and
+  -- 97. Enumerating the region rather than stopping at the first awkward slot
+  -- takes it to 103, which covers every id the game asks for.
+  check("the table reaches the highest music id the scripts ask for",
+    result.count > 97, ("%d slots"):format(result.count))
+
+  -- The awkward slots are kept rather than dropped, because a song is named by
+  -- its index: omitting one would shift every song after it.
+  local placeholders = result.count - result.decoded
+  log("        %d slots do not decode and are kept as placeholders",
+    placeholders)
+  check("almost every slot decodes", result.decoded >= result.count * 0.95,
+    ("%d of %d"):format(result.decoded, result.count))
 
   -- The structural agreement the locator rests on, asserted rather than
   -- assumed: a header's entries are contiguous with the data they point at, so
   -- the arithmetic has to close. It closes for most of them.
   check("most headers run straight into their own channel data",
-    result.exact >= result.count * 0.75,
-    ("%d of %d"):format(result.exact, result.count))
+    result.exact >= result.decoded * 0.75,
+    ("%d of %d"):format(result.exact, result.decoded))
 
   -- Songs use two, three or four channels, and the Game Boy has four.
   local by_count, slack = {}, {}
   for _, song in ipairs(result.songs) do
-    by_count[song.count] = (by_count[song.count] or 0) + 1
-    if not song.exact then
-      slack[song.slack] = (slack[song.slack] or 0) + 1
+    if not song.unparsed then
+      by_count[song.count] = (by_count[song.count] or 0) + 1
+      if not song.exact then
+        slack[song.slack] = (slack[song.slack] or 0) + 1
+      end
     end
   end
   local shape = {}
@@ -3736,7 +3754,7 @@ local function test_music(rom)
   check("no song asks for more channels than the hardware has",
     by_count[5] == nil and by_count[0] == nil)
   check("most songs use three or four channels",
-    (by_count[3] or 0) + (by_count[4] or 0) >= result.count * 0.8)
+    (by_count[3] or 0) + (by_count[4] or 0) >= result.decoded * 0.8)
 
   -- Where a header does not close exactly, by how much. A scatter would mean
   -- the shape is wrong; one consistent value means one unexplained byte.
@@ -3754,16 +3772,18 @@ local function test_music(rom)
   -- Channels are stored in order within a song.
   local ordered = 0
   for _, song in ipairs(result.songs) do
-    local rising = true
-    for index = 2, song.count do
-      if song.channels[index] < song.channels[index - 1] then
-        rising = false
+    if not song.unparsed then
+      local rising = true
+      for index = 2, song.count do
+        if song.channels[index] < song.channels[index - 1] then
+          rising = false
+        end
       end
+      if rising then ordered = ordered + 1 end
     end
-    if rising then ordered = ordered + 1 end
   end
   check_equal("every song's channels are stored in order", ordered,
-    result.count)
+    result.decoded)
 
   -- The channel command language is not decoded, and this records why rather
   -- than leaving the question open for someone to answer the same wrong way.
@@ -3776,7 +3796,7 @@ local function test_music(rom)
   -- nothing. Asserting the degeneracy keeps it from being adopted again.
   local extents = {}
   for _, song in ipairs(result.songs) do
-    for index = 1, song.count - 1 do
+    for index = 1, (song.unparsed and 0 or song.count) - 1 do
       local from = song.bank * 0x4000 + (song.channels[index] - 0x4000)
       local to = song.bank * 0x4000 + (song.channels[index + 1] - 0x4000)
       if to > from and to - from < 4096 then

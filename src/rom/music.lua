@@ -13,6 +13,31 @@
 -- the header and the data, and are accepted but flagged rather than quietly
 -- rounded off.
 --
+-- ## The table is longer than the first run of it
+--
+-- This used to stop at the first entry that did not decode, and reported 59
+-- songs. That is the mistake the trainer class table made and the map headers
+-- made before it, and the game's own scripts said so: `playmusic` asks for
+-- music **78, 93, 96 and 97**, all of them past the end of a 59-entry table.
+--
+-- Walking straight on past the break finds the table continues to index 102,
+-- with only **three** slots in between that do not decode — 59, 78 and 91 —
+-- each an isolated single miss. Index 103 names bank `$C0`, which this
+-- cartridge does not have, and nothing decodes for a long way after it. So the
+-- table is **103 slots**, not 59.
+--
+-- The entries past the break were checked before being believed, against
+-- properties measured from the original 59 that the new ones took no part in
+-- establishing: **147 of their 149 channels open with one of the same handful
+-- of bytes**, and 73% of their bytes fall below `$D0` against the same 73%
+-- before the break. Same data, truncated table.
+--
+-- Slots that do not decode are kept as placeholders, because **entries are
+-- addressed by position**: `playmusic` names a song by index, so dropping one
+-- would not merely lose a song, it would shift every song after it and
+-- silently rewire which music plays where. The same rule the map headers
+-- needed, for the same reason.
+--
 -- This locates and reads the table. It does not play anything: sound would need
 -- the channel command language, which is a bytecode of its own, and a Game Boy
 -- sound chip to feed it to. Neither exists here yet.
@@ -23,6 +48,11 @@ music.MAX_CHANNELS = 4
 music.RECORD_SIZE = 3
 music.MINIMUM = 24
 music.MAX_SONGS = 300
+
+-- How many slots in a row may fail before the table is over. The measured
+-- separation is wide: every gap inside the table is a single slot, and the run
+-- of failures after the last entry is at least eight.
+music.MISS_LIMIT = 4
 
 --- Read a song header.
 -- @return { channels = { addr, ... }, count, exact } or nil
@@ -84,8 +114,22 @@ function music.header_at(rom, bank, addr)
 end
 
 --- Locate the music table.
--- @return { offset, count, songs = { header, ... }, exact } or nil plus why
+--
+-- Two steps, and conflating them is what truncated this table at 59. A run of
+-- consecutive valid headers finds *where the table is*; it does not say where
+-- the table ends, because a table may contain a slot that does not decode.
+-- Enumeration fills the region afterwards, keeping the awkward slots as
+-- placeholders so nothing shifts.
+-- @return { offset, count, decoded, songs = { header|placeholder, ... }, exact }
+--         or nil plus why
 function music.locate(rom)
+  local function decode_at(offset)
+    if offset + 2 >= rom.size then
+      return nil
+    end
+    return music.header_at(rom, rom:u8(offset), rom:u16le(offset + 1))
+  end
+
   local function run_length(from)
     local count = 0
     while count < music.MAX_SONGS do
@@ -93,7 +137,7 @@ function music.locate(rom)
       if at + 2 >= rom.size then
         break
       end
-      if not music.header_at(rom, rom:u8(at), rom:u16le(at + 1)) then
+      if not decode_at(at) then
         break
       end
       count = count + 1
@@ -117,27 +161,62 @@ function music.locate(rom)
 
   -- A run reports where a valid stretch starts, not where the table starts.
   local start = best.offset
-  while start >= music.RECORD_SIZE do
-    local bank = rom:u8(start - music.RECORD_SIZE)
-    local addr = rom:u16le(start - music.RECORD_SIZE + 1)
-    if not music.header_at(rom, bank, addr) then
-      break
-    end
+  while start >= music.RECORD_SIZE
+    and decode_at(start - music.RECORD_SIZE) do
     start = start - music.RECORD_SIZE
   end
 
-  local count = run_length(start)
-  local songs, exact = {}, 0
-  for index = 1, count do
-    local at = start + (index - 1) * music.RECORD_SIZE
-    local header = music.header_at(rom, rom:u8(at), rom:u16le(at + 1))
-    songs[index] = header
-    if header.exact then
-      exact = exact + 1
+  -- Now fill the region. A slot that does not decode is kept rather than
+  -- ending the walk, because the next one usually does and the index of
+  -- everything after it has to stay where it is.
+  local songs, exact, decoded = {}, 0, 0
+  local misses, last_decoded, index = 0, 0, 0
+  while index < music.MAX_SONGS do
+    local at = start + index * music.RECORD_SIZE
+    if at + 2 >= rom.size then
+      break
     end
+
+    local header = decode_at(at)
+    if header then
+      songs[index + 1] = header
+      decoded = decoded + 1
+      last_decoded = index + 1
+      misses = 0
+      if header.exact then
+        exact = exact + 1
+      end
+    else
+      songs[index + 1] = {
+        unparsed = true,
+        bank = rom:u8(at),
+        addr = rom:u16le(at + 1),
+      }
+      misses = misses + 1
+      if misses >= music.MISS_LIMIT then
+        break
+      end
+    end
+    index = index + 1
   end
 
-  return { offset = start, count = count, songs = songs, exact = exact }
+  -- The table ends on its last real entry, not on the placeholders that
+  -- followed it while the walk was deciding it had finished.
+  for slot = #songs, last_decoded + 1, -1 do
+    songs[slot] = nil
+  end
+
+  if #songs < music.MINIMUM then
+    return nil, ("only %d song headers survive enumeration"):format(#songs)
+  end
+
+  return {
+    offset = start,
+    count = #songs,
+    decoded = decoded,
+    songs = songs,
+    exact = exact,
+  }
 end
 
 return music

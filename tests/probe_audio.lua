@@ -207,6 +207,148 @@ function probe.run(rom_path, report_path)
       table.concat(bytes, " "))
   end
 
+  -- How far does the table really go?
+  --
+  -- The locator stops at the first entry that does not validate, which is the
+  -- mistake the trainer class table made and the map headers made before it.
+  -- The scripts say it is a mistake here too: they ask for music ids 78, 93,
+  -- 96 and 97, and the run stops at 59. Entries are addressed by position, so
+  -- an omitted one does not merely lose a song -- it shifts every song after it
+  -- and silently rewires which music plays where.
+  --
+  -- This walks straight on past the end, tolerating failures, and reports what
+  -- is actually there.
+  log("\n== walking past the end of the accepted run ==")
+  local music = require("src.rom.music")
+  local located = music.locate(rom)
+  if located then
+    log("  the locator accepts %d entries from 0x%06X", located.count,
+      located.offset)
+
+    local misses, run_of_misses, worst_gap = 0, 0, 0
+    local last_good = -1
+    for index = 0, 149 do
+      local at = located.offset + index * 3
+      if at + 2 >= rom.size then
+        break
+      end
+      local bank = rom:u8(at)
+      local addr = rom:u16le(at + 1)
+      local header = bank * 0x4000 < rom.size
+        and music.header_at(rom, bank, addr) or nil
+
+      if header then
+        run_of_misses = 0
+        last_good = index
+      else
+        misses = misses + 1
+        run_of_misses = run_of_misses + 1
+        worst_gap = math.max(worst_gap, run_of_misses)
+      end
+
+      -- Report the region around the break and everything past it.
+      if index >= located.count - 3 and index <= located.count + 45 then
+        local raw = {}
+        for i = 0, 2 do
+          raw[#raw + 1] = ("%02X"):format(rom:u8(at + i))
+        end
+        log("  %3d  %s  $%02X:$%04X  %s", index, table.concat(raw, " "),
+          bank, addr,
+          header and ("%d channels, %s"):format(header.count,
+            header.exact and "closes exactly" or "one byte of slack")
+            or "does not decode")
+      end
+
+      if run_of_misses >= 8 then
+        break
+      end
+    end
+
+    -- Are the entries past the break the same kind of thing?
+    --
+    -- They decode, but so can coincidence, and the banks change character at
+    -- index 92 -- $3A/$3B/$3D up to there, then $33, $07 and a run of $5E. So
+    -- they are checked against properties measured from the *original* 59,
+    -- which the new ones took no part in establishing: a channel opens with one
+    -- of only six bytes, most of its bytes are below $D0, and it ends on $FF.
+    local function channel_stats(from, to)
+      local openers, bytes, low, ends_ff, channels = {}, 0, 0, 0, 0
+      for index = from, to do
+        local at = located.offset + index * 3
+        if at + 2 < rom.size then
+          local bank = rom:u8(at)
+          if bank * 0x4000 < rom.size then
+            local header = music.header_at(rom, bank, rom:u16le(at + 1))
+            if header then
+              for slot, pointer in ipairs(header.channels) do
+                channels = channels + 1
+                local base = bank * 0x4000 + (pointer - 0x4000)
+                openers[rom:u8(base)] = (openers[rom:u8(base)] or 0) + 1
+                -- Up to the next channel, or a bounded window for the last.
+                local finish = header.channels[slot + 1]
+                  and (bank * 0x4000 + (header.channels[slot + 1] - 0x4000))
+                  or math.min(base + 256, rom.size - 1)
+                for offset_at = base, finish - 1 do
+                  local value = rom:u8(offset_at)
+                  bytes = bytes + 1
+                  if value < 0xD0 then low = low + 1 end
+                end
+                if finish > base and rom:u8(finish - 1) == 0xFF then
+                  ends_ff = ends_ff + 1
+                end
+              end
+            end
+          end
+        end
+      end
+      return openers, bytes, low, ends_ff, channels
+    end
+
+    local old_openers, old_bytes, old_low, old_ff, old_ch =
+      channel_stats(0, located.count - 1)
+    local new_openers, new_bytes, new_low, new_ff, new_ch =
+      channel_stats(located.count, last_good)
+
+    local known = {}
+    for byte in pairs(old_openers) do
+      known[byte] = true
+    end
+    local recognised, strange = 0, {}
+    for byte, times in pairs(new_openers) do
+      if known[byte] then
+        recognised = recognised + times
+      else
+        strange[#strange + 1] = ("$%02X x%d"):format(byte, times)
+      end
+    end
+
+    local function opener_list(set)
+      local out = {}
+      for byte in pairs(set) do
+        out[#out + 1] = ("$%02X"):format(byte)
+      end
+      table.sort(out)
+      return table.concat(out, " ")
+    end
+
+    log("\n  the first %d entries: %d channels, opening bytes %s",
+      located.count, old_ch, opener_list(old_openers))
+    log("    %d%% of bytes below $D0, %d of %d channels end on $FF",
+      math.floor(old_low / math.max(old_bytes, 1) * 100), old_ff, old_ch)
+    log("  the entries past the break: %d channels, opening bytes %s",
+      new_ch, opener_list(new_openers))
+    log("    %d%% of bytes below $D0, %d of %d channels end on $FF",
+      math.floor(new_low / math.max(new_bytes, 1) * 100), new_ff, new_ch)
+    log("    %d of %d openers are ones the first %d already used%s",
+      recognised, new_ch, located.count,
+      #strange > 0 and (", new: " .. table.concat(strange, " ")) or "")
+
+    log("\n  last entry that decodes: %d", last_good)
+    log("  entries that do not decode before it: %d", misses - run_of_misses)
+    log("  longest run of consecutive failures: %d", worst_gap)
+    log("  the scripts ask for ids up to 97, so the table needs at least 98")
+  end
+
   rom:release()
 
   local fh = io.open(report_path, "w")
