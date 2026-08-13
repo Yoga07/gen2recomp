@@ -96,6 +96,11 @@ function sequencer.new(data, apu)
     -- the pitch mapping, and the tests bound it.
     out_of_range = 0,
     notes_played = 0,
+    -- Which commands were actually executed. The widths are bounded from above
+    -- by the byte layout and from below only by listening, so it matters which
+    -- commands a rendered song actually put through — those are the ones an ear
+    -- has had a chance to check.
+    executed = {},
   }, sequencer)
 end
 
@@ -221,6 +226,8 @@ function sequencer:advance(channel)
       self:strike(channel, pitch, channel.duration)
       return
     end
+
+    self.executed[opcode] = (self.executed[opcode] or 0) + 1
 
     if opcode >= music_ops.FIRST_OCTAVE and opcode <= music_ops.LAST_OCTAVE then
       channel.octave = 8 - (opcode - music_ops.FIRST_OCTAVE)

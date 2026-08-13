@@ -1734,6 +1734,41 @@ That is inaudible to a walk and obvious to a listener, which makes rendering the
 songs a sharper instrument than anything in the byte layout, and the only one
 available for the direction the layout cannot see.
 
+### The instrument was used, and it passed
+
+Three songs were rendered and played back, and reported as sounding like the
+real tunes — right melodies, right pitch, right tempo, and no spurious notes.
+
+That last part is the one that carries weight. It is the only evidence this
+project has ever had bounding the widths **from below**, and it is worth being
+exact about how far it reaches:
+
+| | commands |
+|---|---|
+| in the table | 40 |
+| executed anywhere in the corpus | 15 |
+| **executed by the songs that were listened to** | **13** |
+| executed in the corpus but not in those songs | 2 — `pitch_slide`, `sound_jump` |
+
+So thirteen commands are now bounded in both directions: from above by the
+extents and the address checks, from below by an ear that would have heard an
+extra note. Two more occur in the corpus and have not been listened to. The
+remaining twenty-five never execute at all, and for those the borrowed widths
+rest on nothing but the source they were borrowed from — which is exactly where
+the script opcode table stood before its own walk, and is not an argument that
+they are right.
+
+One number moved and it is worth saying why rather than leaving two figures
+that disagree. An earlier static walk found 21 of 48 commands present in the
+byte streams; execution reaches 23 of 48 counting the eight octave commands.
+Execution reaches *more* because it follows `sound_call` into shared
+subroutines and plays each song's last channel, which has no next channel to
+bound it and so was never in the extent-bounded scan at all.
+
+The pitch mapping is confirmed too, in the only way it could be. It is ours
+rather than the cartridge's, so a mapping shifted by an octave would have
+produced music that was recognisable and *wrong*, and a listener says at once.
+
 ### Movement
 
 `applymovement` names an object and points at a little language of its own: one

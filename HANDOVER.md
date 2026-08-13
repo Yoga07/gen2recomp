@@ -181,9 +181,16 @@ problems and only one of them is the wall:
    small is invisible, because the operand is then read as a note and a note is
    one byte, so the walk covers the same distance. An earlier version of this
    file claimed the measure was sound for a fixed hypothesis. It is not, and
-   that is retracted. 27 of the 48 commands never appear in the corpus at all.
-   The remaining instrument for the direction the layout cannot see is
-   **listening**, because a width one too small plays a spurious note.
+   that is retracted. The remaining instrument for the direction the layout
+   cannot see is **listening**, because a width one too small plays a spurious
+   note rather than desynchronising anything.
+   That has now been done. Three songs were rendered and played back and
+   reported as the real tunes with no spurious notes, which bounds from below
+   the **13 of 40 commands those songs executed**. Two more (`pitch_slide`,
+   `sound_jump`) occur in the corpus and have not been heard; **25 never execute
+   anywhere**, and for those the borrowed widths rest on nothing but the source
+   they came from. Rendering more songs is the cheap way to extend this —
+   `--probe-song <rom> <report> <index>` takes a song number.
 3. **The sound chip.** ~~Not started~~ **done**, in `src/audio/apu.lua`. Four
    channels, the frame sequencer, the mixer and the output capacitor. It takes
    register writes at `$FF10`–`$FF3F`, so an emulator trace could be replayed

@@ -159,6 +159,87 @@ function probe.run(rom_path, report_path, which)
   end
   log("  in %s", love.filesystem.getSaveDirectory())
 
+  -- How much of the width table has an ear actually had a chance to check?
+  --
+  -- Widths are bounded from above by the byte layout and from below only by
+  -- listening, because a width one too small is read as a note and plays a
+  -- spurious pitch rather than desynchronising. So the commands the rendered
+  -- songs *executed* are the ones that have been checked in both directions,
+  -- and the rest have not. Saying which is the difference between "the music
+  -- sounds right" and a claim somebody can act on.
+  log("\n== which commands the rendered songs actually put through ==")
+  do
+    local music_ops = require("src.rom.music_ops")
+    local heard = {}
+    for _, index in ipairs(wanted) do
+      local song = located.songs[index + 1]
+      if song and not song.unparsed then
+        local chip = { rate = probe.RATE }
+        function chip:write() end
+        function chip:generate() return {} end
+        local player = sequencer.new(rom.data, chip)
+        local channels = {}
+        for slot, address in ipairs(song.channels) do
+          channels[slot] = song.bank * 0x4000 + (address - 0x4000)
+        end
+        player:play(channels, song.bank)
+        for _ = 1, math.floor(20 * sequencer.FRAME_RATE) do
+          if not player:frame() then
+            break
+          end
+        end
+        for opcode, times in pairs(player.executed) do
+          heard[opcode] = (heard[opcode] or 0) + times
+        end
+      end
+    end
+
+    -- And the whole corpus, for comparison.
+    local corpus = {}
+    for _, song in ipairs(located.songs) do
+      if not song.unparsed then
+        local chip = { rate = probe.RATE }
+        function chip:write() end
+        function chip:generate() return {} end
+        local player = sequencer.new(rom.data, chip)
+        local channels = {}
+        for slot, address in ipairs(song.channels) do
+          channels[slot] = song.bank * 0x4000 + (address - 0x4000)
+        end
+        player:play(channels, song.bank)
+        for _ = 1, 900 do
+          if not player:frame() then
+            break
+          end
+        end
+        for opcode in pairs(player.executed) do
+          corpus[opcode] = true
+        end
+      end
+    end
+
+    local listed, in_corpus, in_heard = 0, 0, 0
+    local unheard = {}
+    for opcode, entry in pairs(music_ops.commands) do
+      listed = listed + 1
+      if corpus[opcode] then
+        in_corpus = in_corpus + 1
+        if heard[opcode] then
+          in_heard = in_heard + 1
+        else
+          unheard[#unheard + 1] = entry[1]
+        end
+      end
+    end
+    table.sort(unheard)
+
+    log("  %d commands in the table", listed)
+    log("  %d of them are executed anywhere in the corpus", in_corpus)
+    log("  %d of those were executed by the songs that were rendered", in_heard)
+    log("  executed in the corpus but not in the rendered songs: %s",
+      #unheard > 0 and table.concat(unheard, ", ") or "none")
+  end
+
   rom:release()
   write(report_path)
   return true

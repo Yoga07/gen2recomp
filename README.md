@@ -72,7 +72,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | Music table | located — 103 slots, 100 songs, 256 channel extents |
 | Channel bytecode | widths borrowed from pokecrystal — bounded above, see docs |
 | Game Boy sound chip | working — measured against the hardware, and heard |
-| **Engine:** music sequencer | working — 99 of 100 songs play, 42253 notes |
+| **Engine:** music sequencer | working — 99 of 100 songs play, and sound right |
 | Audio playback | renders to a file; not wired into the game yet |
 | Reading real .sav files | working — read from a real Crystal save |
 | **Engine:** map edge connections | working — 142 crossings |
