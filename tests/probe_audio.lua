@@ -349,6 +349,254 @@ function probe.run(rom_path, report_path)
     log("  the scripts ask for ids up to 97, so the table needs at least 98")
   end
 
+  -- Is there a second table of the same shape?
+  --
+  -- Sound effects are channel data too — the scripts' `playsound` operands run
+  -- to 202 where the song table has 103 slots, so they index something else —
+  -- and a sound effect's header is the same three-byte-entry shape a song's is.
+  -- So the locator should find it without any new technique: it takes the
+  -- longest run of valid headers, and a second table is a second run.
+  log("\n== every run of song-header pointers, not just the longest ==")
+  do
+    local runs = {}
+    local offset = 0
+    while offset <= rom.size - 3 do
+      local bank = rom:u8(offset)
+      local ok = bank * 0x4000 < rom.size
+        and music.header_at(rom, bank, rom:u16le(offset + 1))
+      if ok then
+        local start = offset
+        local count = 0
+        while offset <= rom.size - 3 do
+          local next_bank = rom:u8(offset)
+          if next_bank * 0x4000 >= rom.size
+            or not music.header_at(rom, next_bank, rom:u16le(offset + 1)) then
+            break
+          end
+          count = count + 1
+          offset = offset + 3
+        end
+        if count >= 12 then
+          runs[#runs + 1] = { at = start, count = count }
+        end
+      else
+        offset = offset + 1
+      end
+    end
+
+    table.sort(runs, function(a, b) return a.count > b.count end)
+    log("  %d runs of twelve or more consecutive headers", #runs)
+    for index = 1, math.min(#runs, 10) do
+      local run = runs[index]
+      -- Which banks the entries name, since music and sound effects live apart.
+      local banks, order = {}, {}
+      for step = 0, run.count - 1 do
+        local bank = rom:u8(run.at + step * 3)
+        if not banks[bank] then
+          banks[bank] = true
+          order[#order + 1] = bank
+        end
+      end
+      table.sort(order)
+      local names = {}
+      for _, bank in ipairs(order) do
+        names[#names + 1] = ("$%02X"):format(bank)
+      end
+      log("    0x%06X  %3d entries  banks %s%s", run.at, run.count,
+        table.concat(names, " "),
+        located and run.at == located.offset and "   <-- the song table" or "")
+    end
+    log("  the scripts ask for sound ids up to 202, so a table for them needs")
+    log("  at least 203 entries")
+  end
+
+  -- Nothing. All three runs above are the one song table, split by the three
+  -- slots inside it that do not decode -- 59 entries, then 18, then 12, each
+  -- run starting three bytes after the last one stopped.
+  --
+  -- So the sound effects are not a run of headers of *that* shape, and the
+  -- likeliest reason is in the validator rather than in the cartridge:
+  -- `header_at` insists the first entry be channel 0, because that is what
+  -- every song does. A sound effect does not have to start on channel 0 -- the
+  -- hardware has one set of channels and Gen 2 drives them from two sets of
+  -- slots, so an effect that only rattles the noise channel would open on a
+  -- later one. That is a testable difference rather than a guess.
+  log("\n== the same search, but a header may open on any channel ==")
+  do
+    local function relaxed(bank, addr)
+      if addr < 0x4000 or addr > 0x7FFF then
+        return nil
+      end
+      if bank < 0 or bank * 0x4000 >= rom.size then
+        return nil
+      end
+      local base = bank * 0x4000 + (addr - 0x4000)
+      if base + 12 >= rom.size then
+        return nil
+      end
+      local first = rom:u8(base)
+      local count = math.floor(first / 64) + 1
+      local channel = first % 16
+      if channel > 7 then
+        return nil
+      end
+      for index = 0, count - 1 do
+        local entry = base + index * 3
+        local marker = rom:u8(entry)
+        if marker % 16 ~= channel + index then
+          return nil
+        end
+        if index > 0 and marker >= 64 then
+          return nil
+        end
+        local pointer = rom:u16le(entry + 1)
+        if pointer < 0x4000 or pointer > 0x7FFF then
+          return nil
+        end
+      end
+      return count, channel
+    end
+
+    local runs = {}
+    local offset = 0
+    while offset <= rom.size - 3 do
+      if relaxed(rom:u8(offset), rom:u16le(offset + 1)) then
+        local start, count = offset, 0
+        while offset <= rom.size - 3
+          and relaxed(rom:u8(offset), rom:u16le(offset + 1)) do
+          count = count + 1
+          offset = offset + 3
+        end
+        if count >= 20 then
+          runs[#runs + 1] = { at = start, count = count }
+        end
+      else
+        offset = offset + 1
+      end
+    end
+
+    table.sort(runs, function(a, b) return a.count > b.count end)
+    log("  %d runs of twenty or more", #runs)
+    for index = 1, math.min(#runs, 8) do
+      local run = runs[index]
+      local channels = {}
+      for step = 0, math.min(run.count, 8) - 1 do
+        local _, channel = relaxed(rom:u8(run.at + step * 3),
+          rom:u16le(run.at + step * 3 + 1))
+        channels[#channels + 1] = tostring(channel)
+      end
+      log("    0x%06X  %3d entries  first channels: %s", run.at, run.count,
+        table.concat(channels, " "))
+    end
+
+    -- The song table ends at a known place. What is immediately after it?
+    --
+    -- This is the same lever the marts needed: a pointer table that ends
+    -- exactly where the next thing begins is not something noise arranges. If
+    -- the sound effects sit directly behind the songs, the boundary is already
+    -- known and the table does not have to be searched for at all.
+    -- Where do the channel-4 headers actually begin, and what is in between?
+    local earliest
+    for _, run in ipairs(runs) do
+      local _, channel = relaxed(rom:u8(run.at), rom:u16le(run.at + 1))
+      if channel and channel >= 4 and (not earliest or run.at < earliest) then
+        earliest = run.at
+      end
+    end
+
+    if located and earliest then
+      local after = located.offset + located.count * 3
+      log("\n  songs end at 0x%06X, channel-4 headers begin at 0x%06X",
+        after, earliest)
+      log("  %d bytes sit between them:", earliest - after)
+      local dump = {}
+      for at = after, math.min(earliest - 1, after + 71) do
+        dump[#dump + 1] = ("%02X"):format(rom:u8(at))
+      end
+      log("    %s%s", table.concat(dump, " "),
+        earliest - after > 72 and " ..." or "")
+    end
+
+    if located and earliest then
+      local after = earliest
+      log("\n  enumerating from 0x%06X:", after)
+
+      local decoded, misses, run_of_misses, last = 0, 0, 0, -1
+      local channels_seen = {}
+      for index = 0, 259 do
+        local at = after + index * 3
+        if at + 2 >= rom.size then
+          break
+        end
+        local count, channel = relaxed(rom:u8(at), rom:u16le(at + 1))
+        if count then
+          decoded = decoded + 1
+          last = index
+          run_of_misses = 0
+          channels_seen[channel] = (channels_seen[channel] or 0) + 1
+        else
+          misses = misses + 1
+          run_of_misses = run_of_misses + 1
+          if run_of_misses >= 8 then
+            break
+          end
+        end
+        if index < 6 or index == 202 then
+          log("    %3d  0x%06X  %s", index, at,
+            count and ("%d channels, opens on channel %d"):format(count,
+              channel) or "does not decode")
+        end
+      end
+
+      local spread = {}
+      for channel, times in pairs(channels_seen) do
+        spread[#spread + 1] = ("ch%d x%d"):format(channel, times)
+      end
+      table.sort(spread)
+      log("    %d decode, %d do not, last at index %d", decoded,
+        misses - run_of_misses, last)
+      log("    opening channels: %s", table.concat(spread, ", "))
+      log("    the scripts need at least 203 entries; this reaches %d", last)
+    end
+
+    -- The bytes between the two tables are a third structure, and a very
+    -- regular one. Measure the stride rather than eyeballing the dump.
+    if located and earliest then
+      local after = located.offset + located.count * 3
+      log("\n  the run of pointers between them:")
+      -- The longest stretch where every entry names the same bank and the
+      -- addresses climb by a constant amount. Started at every offset in the
+      -- gap rather than at its beginning, because the gap opens with something
+      -- else — an inline header — and a scan anchored to the first byte would
+      -- measure that instead.
+      local best = { count = 0 }
+      for from = after, earliest - 12 do
+        local bank = rom:u8(from)
+        local stride = rom:u16le(from + 4) - rom:u16le(from + 1)
+        if stride > 0 and stride < 64 then
+          local count = 1
+          local at = from + 3
+          while at + 2 < earliest do
+            if rom:u8(at) ~= bank
+              or rom:u16le(at + 1) - rom:u16le(at - 2) ~= stride then
+              break
+            end
+            count = count + 1
+            at = at + 3
+          end
+          if count > best.count then
+            best = { count = count, at = from, bank = bank, stride = stride }
+          end
+        end
+      end
+      log("    starts 0x%06X, %d entries, all bank $%02X", best.at or 0,
+        best.count, best.bank or 0)
+      log("    addresses step by exactly %d", best.stride or 0)
+      log("    a step of exactly 9 is a three-channel header, so these point")
+      log("    at headers stored back to back rather than scattered")
+    end
+  end
+
   rom:release()
 
   local fh = io.open(report_path, "w")

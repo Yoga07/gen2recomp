@@ -1823,6 +1823,52 @@ species id and needs cry data that has not been found either. Pointing either at
 the song table would play an arbitrary tune every time somebody opened a door,
 which is worse than silence and much harder to notice as a bug.
 
+### Two more tables, located but not understood
+
+`playsound` and `cry` are still ignored, and the reason had been "the tables
+that index them are not located". Looking properly moved that on, though not all
+the way, and the partial result is worth having written down.
+
+Sound effects are channel data too, so they should be findable with no new
+technique at all: the locator takes the longest run of valid sound headers, and
+a second table would be a second run. Searching for **every** run rather than
+the longest finds three — and all three are the one song table, split by the
+three slots inside it that do not decode. There is no second table of that
+shape.
+
+The reason turned out to be in the validator rather than in the cartridge.
+`header_at` insists a header's first entry is channel 0, because that is what
+every song does. Gen 2 drives the hardware's four channels from two sets of
+slots, and sound effects use the second set, so an effect opens on channel 4 or
+later. Relaxing that one condition changes the picture immediately: **runs of
+headers opening on channels 4, 6 and 7 appear**, in a region directly after the
+songs.
+
+What is in that region, in order:
+
+| where | what |
+|---|---|
+| `0x0E91A3` | the song table ends |
+| `0x0E91A3` | one inline 4-channel header, all four channels pointing at the same address, then `$FF` |
+| `0x0E91B0` | **38 pointers, all bank `$3C`, addresses climbing by exactly 9** |
+| `0x0E927C` | pointers to headers opening on channels 4–7; 73 of the first 78 decode |
+
+A step of exactly nine is three channel entries, so that middle table points at
+three-channel headers stored back to back rather than scattered — a uniform
+block of small sounds.
+
+**What this does not establish**, and the distinction is the point. That the
+channel-4 table is what `playsound` indexes is *not* shown: the scripts ask for
+sound ids up to 202 and this reaches 77. What the 38-entry block is, is not
+shown either — a uniform run of small three-channel sounds is what the cries
+would look like, and "is what X would look like" is the kind of reasoning this
+document keeps a list of. Neither is wired up, because pointing `playsound` at a
+table whose indexing has not been worked out would play an arbitrary noise
+rather than the right one, and that is a bug that sounds like a feature.
+
+So: two more structures located, an id mapping still missing, and a validator
+whose one over-tight condition had been hiding both.
+
 ### The mixer was most of the cost
 
 Generating a second of audio took 0.358 seconds, which is a third of a core for

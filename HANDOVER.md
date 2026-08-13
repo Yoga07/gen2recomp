@@ -160,7 +160,7 @@ cures, and reading a real `.sav`.
 | | state |
 |---|---|
 | Badges | tracked and gated, but nothing awards them |
-| Sound effects and cries | the tables that index them are not located |
+| Sound effects and cries | two tables located; what indexes them is not |
 | `special` routines | 127 of them, assembly, not runnable from bytecode |
 | Unown's 26 forms | pic table locator does not find them |
 
@@ -215,10 +215,19 @@ problems and only one of them is the wall:
    (`music_banks`), because `sound_call` goes anywhere inside a bank and songs
    share subroutines; a test asserts a song rendered from the cache is sample
    for sample identical to the same song rendered from the cartridge.
-   `playsound` ×189 and `cry` ×70 are **still ignored on purpose**: sfx ids run
-   to 202 against 103 song slots so they index a table nobody has located, and
-   `cry` needs cry data that has not been found. Pointing either at the song
-   table would play an arbitrary tune whenever somebody opened a door.
+   `playsound` ×189 and `cry` ×70 are **still ignored on purpose**.
+6. **Sound effects and cries.** Half done, and the half that is done is worth
+   reading `--probe-audio` for. The song locator insists a header opens on
+   channel 0, which every song does and no sound effect does — Gen 2 drives the
+   four hardware channels from two sets of slots and effects use the second.
+   Relaxing that one condition finds, directly after the song table: an inline
+   4-channel header, then **38 pointers into bank `$3C` whose addresses climb by
+   exactly 9** (three channel entries, so a uniform block of small three-channel
+   sounds), then at `0x0E927C` **pointers to headers opening on channels 4–7**.
+   What is *not* established is the indexing: the scripts ask for sound ids up
+   to 202 and the channel-4 table reaches 77, and the 38-entry block is only
+   *shaped* like the cries. Do not wire either up on the strength of that — a
+   wrong table here plays a plausible noise rather than failing.
 
 ### The one unverified claim
 
