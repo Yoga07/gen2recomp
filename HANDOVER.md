@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 53 commits in, 693 tests passing
-against Crystal and none failing — 711 with a second, deliberately wrong
+Written at commit `6db0197` and updated since, 54 commits in, 708 tests passing
+against Crystal and none failing — 726 with a second, deliberately wrong
 cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
@@ -56,7 +56,7 @@ love . --shot <png> <mode>
 love . --probe-<name> <rom> <report> [extra]
 ```
 
-There are 37 probes. They are diagnostics kept from each investigation, not
+There are 38 probes. They are diagnostics kept from each investigation, not
 tests — `--probe-vm`, `--probe-channels`, `--probe-terrain` and `--probe-time`
 are the ones most likely to be useful again. `--shot <mode>` renders one frame
 of the running game and exits; the modes are listed in `main.lua` and cover
@@ -112,6 +112,12 @@ here. Examples that all nearly shipped:
   a wall has floor on both sides of every cell.
 - The obstacle detector's first answer was the Pokémon Centre nurse.
 
+**A thing that always produces output needs measuring, not sampling.** The
+sound chip makes a noise whether or not it is right, so nothing about it is
+judged by ear: frequencies are counted, duty cycles timed, shift-register
+periods counted exactly. That found a missing output capacitor on the first
+run, which no amount of listening would have isolated.
+
 **Render it and look.** Bugs the tests could not see: column-major tiles, a
 missing `/` glyph, text overrunning 160px, the battle bag never being drawn, an
 Antidote healing nothing, POKéMON losing its accent. When something is on
@@ -147,7 +153,7 @@ cures, and reading a real `.sav`.
 | | state |
 |---|---|
 | Badges | tracked and gated, but nothing awards them |
-| Audio playback | channel bytecode unsolved; then a sound chip to write |
+| Audio playback | the chip is written; the channel bytecode is what is left |
 | `special` routines | 127 of them, assembly, not runnable from bytecode |
 | Unown's 26 forms | pic table locator does not find them |
 
@@ -168,11 +174,13 @@ problems and only one of them is the wall:
    came from or from an emulator's writes to `$FF10`–`$FF3F`, either walks all
    256 extents exactly or does not, and cannot bend itself to fit. That is the
    route, and it is the same one the script opcodes took.
-3. **The sound chip.** Not started and **not blocked** by any of the above: four
-   channels, a frame sequencer, mixing, resampling into a queueable source. It
-   is the largest single code item left in the project and carries no research
-   risk — it can be written and tested against a synthetic tone before anything
-   about the bytecode is known.
+3. **The sound chip.** ~~Not started~~ **done**, in `src/audio/apu.lua`. Four
+   channels, the frame sequencer, the mixer and the output capacitor. It takes
+   register writes at `$FF10`–`$FF3F`, so an emulator trace could be replayed
+   into it unmodified. Verified by measurement rather than by ear — frequency
+   within 0.037%, both noise periods exact — because a sound chip makes a noise
+   whether or not it is right. `--probe-apu` writes a WAV and an oscilloscope
+   trace into the save directory.
 4. **Wiring it in.** Small. `playsound` ×189, `playmusic` ×79, `cry` ×70 and
    `waitsfx` ×85 are currently in the interpreter's ignored list, and map
    headers already name a music id. `cry` operands run to 250, so they are

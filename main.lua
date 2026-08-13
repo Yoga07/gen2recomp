@@ -45,6 +45,7 @@ local HEADLESS = {
   ["--probe-foreign"] = "tests.probe_foreign",
   ["--probe-cures"] = "tests.probe_cures",
   ["--probe-whirlpool"] = "tests.probe_whirlpool",
+  ["--probe-apu"] = "tests.probe_apu",
   ["--probe-terrain"] = "tests.probe_terrain",
   ["--probe-time"] = "tests.probe_time",
   ["--dump-tilesets"] = "tests.dump_tilesets",

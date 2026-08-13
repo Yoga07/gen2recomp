@@ -2480,6 +2480,299 @@ local function test_storage(base_stats)
   check_equal("at the right level", restored:box(5)[1].level, 70)
 end
 
+-- The sound chip.
+--
+-- A sound chip has a failure mode nothing else here has: **it makes a noise
+-- either way**. "I can hear something" is the audio version of the metrics this
+-- suite keeps as cautionary tales, so nothing below is judged by ear. Ask for
+-- 440 Hz and the output is measured for 440 Hz; ask for a 12.5% duty and the
+-- output is measured for how long it stays high; the shift register's period is
+-- counted exactly.
+--
+-- Needs no cartridge: the hardware is documented, so this is the one part of
+-- the audio problem that can be written from the specification and checked
+-- against arithmetic.
+local function test_apu()
+  log("\n== sound chip ==")
+
+  local apu = require("src.audio.apu")
+  local RATE = 44100
+
+  local function tone(chip, hz, duty, volume, channel_two)
+    local register = math.floor(2048 - 131072 / hz + 0.5)
+    chip:write(0xFF26, 0x80)
+    chip:write(0xFF24, 0x77)
+    chip:write(0xFF25, 0xFF)
+    local base = channel_two and 0xFF15 or 0xFF10
+    chip:write(base + 1, duty * 64)
+    chip:write(base + 2, volume * 16)
+    chip:write(base + 3, register % 256)
+    chip:write(base + 4, 0x80 + math.floor(register / 256))
+    return register
+  end
+
+  local function hertz(samples)
+    local crossings, previous = 0, nil
+    for index = 1, #samples, 2 do
+      local value = samples[index]
+      if previous and ((previous < 0) ~= (value < 0)) then
+        crossings = crossings + 1
+      end
+      previous = value
+    end
+    return crossings / 2 / ((#samples / 2) / RATE)
+  end
+
+  local function swing(samples, from, to)
+    local low, high = math.huge, -math.huge
+    for index = from or 1, math.min(to or #samples, #samples), 2 do
+      low = math.min(low, samples[index])
+      high = math.max(high, samples[index])
+    end
+    return low > high and 0 or (high - low)
+  end
+
+  --- When the output goes quiet and stays quiet, in seconds.
+  --
+  -- Asked as a measurement rather than as "is the tail quiet", because the two
+  -- are not the same question. Switching a channel off steps the mix, and the
+  -- output capacitor answers a step with a decaying transient — so a window
+  -- starting at the moment of the cut is never silent, however correct the
+  -- chip is. Finding where the sound *ends* tests the length counter's timing;
+  -- checking a window only tests where the window was put.
+  local function silence_time(samples)
+    local block = 256
+    local frames = #samples / 2
+    local loudest = 0
+    local blocks = {}
+    for start = 0, frames - block, block do
+      local level = swing(samples, start * 2 + 1, (start + block) * 2)
+      blocks[#blocks + 1] = { at = start, level = level }
+      loudest = math.max(loudest, level)
+    end
+    local threshold = loudest * 0.1
+    local quiet_from = frames
+    for index = #blocks, 1, -1 do
+      if blocks[index].level > threshold then
+        break
+      end
+      quiet_from = blocks[index].at
+    end
+    return quiet_from / RATE
+  end
+
+  -- Frequency. The hardware's own formula is 131072/(2048-n), and the point is
+  -- that the chip reproduces it, not that it lands on a musical note.
+  log("        wanted | measured | hardware formula")
+  local worst = 0
+  for _, wanted in ipairs({ 110, 220, 440, 880 }) do
+    local chip = apu.new(RATE)
+    local register = tone(chip, wanted, 2, 15, true)
+    local samples = chip:generate(math.floor(RATE / 2))
+    local measured = hertz(samples)
+    local expected = 131072 / (2048 - register)
+    local error_pct = math.abs(measured - expected) / expected * 100
+    worst = math.max(worst, error_pct)
+    log("        %6d | %8.2f | %8.2f", wanted, measured, expected)
+  end
+  check("every tone comes out at the frequency the hardware would give",
+    worst < 0.5, ("worst error %.3f%%"):format(worst))
+
+  -- Duty. Measured low, where a period is 400 samples, so the one sample per
+  -- transition that lands between levels is a quarter of a percent rather
+  -- than a whole one.
+  local nominal = { [0] = 0.125, 0.25, 0.5, 0.75 }
+  local duty_error = 0
+  for duty = 0, 3 do
+    local chip = apu.new(RATE)
+    tone(chip, 110, duty, 15, true)
+    local samples = chip:generate(math.floor(RATE / 2))
+    local high, total = 0, 0
+    for index = 1, #samples, 2 do
+      if samples[index] > 0 then high = high + 1 end
+      total = total + 1
+    end
+    duty_error = math.max(duty_error, math.abs(high / total - nominal[duty]))
+  end
+  check("each duty cycle is high for the fraction of the time it should be",
+    duty_error < 0.01, ("worst %.4f off"):format(duty_error))
+
+  -- The envelope, which is also the test that caught the missing output
+  -- capacitor: without one a falling envelope slides the waveform downwards
+  -- instead of shrinking it, and the loudness never changes.
+  do
+    local chip = apu.new(RATE)
+    chip:write(0xFF26, 0x80)
+    chip:write(0xFF24, 0x77)
+    chip:write(0xFF25, 0xFF)
+    chip:write(0xFF16, 2 * 64)
+    chip:write(0xFF17, 0xF1)     -- full, falling, one step every 1/64 s
+    local register = math.floor(2048 - 131072 / 440 + 0.5)
+    chip:write(0xFF18, register % 256)
+    chip:write(0xFF19, 0x80 + math.floor(register / 256))
+
+    local samples = chip:generate(math.floor(RATE / 2))
+    local window = math.floor(RATE / 16)
+    local first = swing(samples, window * 2 + 1, window * 4)
+    local later = swing(samples, window * 6 + 1, window * 8)
+    local silent = swing(samples, window * 10 + 1, #samples)
+    log("        envelope swing: %.4f then %.4f then %.4f",
+      first, later, silent)
+    check("a falling envelope actually gets quieter", later < first * 0.8)
+    check("and reaches silence", silent < 0.001)
+  end
+
+  -- A rising envelope, so the direction bit is not being ignored.
+  do
+    local chip = apu.new(RATE)
+    chip:write(0xFF26, 0x80)
+    chip:write(0xFF24, 0x77)
+    chip:write(0xFF25, 0xFF)
+    chip:write(0xFF16, 2 * 64)
+    chip:write(0xFF17, 0x0B)     -- from nothing, rising, period 3
+    local register = math.floor(2048 - 131072 / 440 + 0.5)
+    chip:write(0xFF18, register % 256)
+    chip:write(0xFF19, 0x80 + math.floor(register / 256))
+    local samples = chip:generate(math.floor(RATE / 2))
+    local window = math.floor(RATE / 8)
+    check("a rising envelope gets louder",
+      swing(samples, window * 6 + 1, #samples)
+        > swing(samples, 1, window * 2))
+  end
+
+  -- The noise channel's shift register. Its periods are exact numbers, which
+  -- makes this the sharpest check available anywhere in the chip.
+  --
+  -- What repeats is the audible sequence rather than the whole register: in
+  -- seven-bit mode bits 0 to 6 are a closed register and the upper bits become
+  -- a delay line with no feedback, so the full fifteen bits never return to the
+  -- value a trigger loads. Measuring those would report no period at all, which
+  -- would be a fact about the measure.
+  for _, width_7 in ipairs({ false, true }) do
+    local chip = apu.new(RATE)
+    chip:write(0xFF26, 0x80)
+    chip:write(0xFF21, 0xF0)
+    chip:write(0xFF22, width_7 and 0x08 or 0x00)
+    chip:write(0xFF23, 0x80)
+
+    local mask = width_7 and 0x80 or 0x8000
+    local start = chip.noise.lfsr % mask
+    local steps = 0
+    repeat
+      chip:advance(chip.noise.timer)
+      steps = steps + 1
+    until chip.noise.lfsr % mask == start or steps > 40000
+    check_equal(("the %d-bit shift register repeats after the right number of "
+      .. "shifts"):format(width_7 and 7 or 15), steps,
+      width_7 and 127 or 32767)
+  end
+
+  -- The wave channel reads wave RAM, and the volume code shifts it.
+  do
+    local chip = apu.new(RATE)
+    chip:write(0xFF26, 0x80)
+    for index = 0, 15 do
+      chip:write(0xFF30 + index, index * 16 + index)
+    end
+    chip:write(0xFF1A, 0x80)
+    chip:write(0xFF1C, 0x20)
+    local register = math.floor(2048 - 131072 / 440 + 0.5)
+    chip:write(0xFF1D, register % 256)
+    chip:write(0xFF1E, 0x80 + math.floor(register / 256))
+
+    local seen = {}
+    for _ = 1, 2048 do
+      chip:advance(chip.wave.timer)
+      seen[chip.wave.sample] = true
+    end
+    local distinct = 0
+    for _ in pairs(seen) do distinct = distinct + 1 end
+    check_equal("a ramp in wave RAM comes back out as sixteen levels",
+      distinct, 16)
+
+    -- Volume code 0 is silence, not full volume: the shift is four places.
+    chip:write(0xFF1C, 0x00)
+    local quiet = chip:generate(math.floor(RATE / 8))
+    check("volume code zero is silence", silence_time(quiet) < 0.02,
+      ("still sounding at %.3fs"):format(silence_time(quiet)))
+  end
+
+  -- The length counter, which is what stops a note.
+  do
+    local chip = apu.new(RATE)
+    chip:write(0xFF26, 0x80)
+    chip:write(0xFF24, 0x77)
+    chip:write(0xFF25, 0xFF)
+    chip:write(0xFF16, 2 * 64 + 32)   -- length 32, so 32 ticks at 256 Hz
+    chip:write(0xFF17, 0xF0)
+    local register = math.floor(2048 - 131072 / 440 + 0.5)
+    chip:write(0xFF18, register % 256)
+    chip:write(0xFF19, 0xC0 + math.floor(register / 256))  -- trigger + enable
+
+    -- The length counter is clocked at 256 Hz, so 32 of them is exactly an
+    -- eighth of a second. That is a number to measure against, not a bound.
+    local samples = chip:generate(math.floor(RATE / 4))
+    local stopped = silence_time(samples)
+    log("        a length of 32 stops the note at %.4fs (256Hz gives %.4fs)",
+      stopped, 32 / 256)
+    check("a note with a length still sounds at the start",
+      swing(samples, 1, math.floor(RATE / 16)) > 0.1)
+    check("and stops when its length runs out",
+      math.abs(stopped - 32 / 256) < 0.01,
+      ("%.4fs against %.4fs"):format(stopped, 32 / 256))
+  end
+
+  -- Panning, which is the one thing a mono measurement would miss entirely.
+  do
+    local chip = apu.new(RATE)
+    chip:write(0xFF26, 0x80)
+    chip:write(0xFF24, 0x77)
+    chip:write(0xFF25, 0x20)   -- channel 2 to the left only
+    chip:write(0xFF16, 2 * 64)
+    chip:write(0xFF17, 0xF0)
+    local register = math.floor(2048 - 131072 / 440 + 0.5)
+    chip:write(0xFF18, register % 256)
+    chip:write(0xFF19, 0x80 + math.floor(register / 256))
+    local samples = chip:generate(math.floor(RATE / 8))
+
+    local left, right = 0, 0
+    for index = 1, #samples, 2 do
+      left = math.max(left, math.abs(samples[index]))
+      right = math.max(right, math.abs(samples[index + 1]))
+    end
+    check("a channel panned left comes out on the left", left > 0.1)
+    check("and not on the right", right < 0.001)
+  end
+
+  -- Powering the chip down silences it, which the sound engine relies on
+  -- between tracks.
+  do
+    local chip = apu.new(RATE)
+    tone(chip, 440, 2, 15, true)
+    chip:generate(64)
+    chip:write(0xFF26, 0x00)
+    local samples = chip:generate(math.floor(RATE / 8))
+    check("powering the chip down silences it", swing(samples) < 0.001)
+  end
+
+  -- And the capacitor itself: a steady tone must average to nothing, or every
+  -- channel starting and stopping would step the whole mix and click.
+  do
+    local chip = apu.new(RATE)
+    tone(chip, 440, 0, 15, true)   -- 12.5% duty, the least symmetric one
+    local samples = chip:generate(math.floor(RATE / 2))
+    local sum, count = 0, 0
+    -- Skip the first tenth, which is the capacitor charging.
+    for index = math.floor(RATE / 10) * 2 + 1, #samples, 2 do
+      sum = sum + samples[index]
+      count = count + 1
+    end
+    local mean = sum / count
+    log("        mean level of a 12.5%% duty tone: %.5f", mean)
+    check("the output carries no DC offset", math.abs(mean) < 0.005)
+  end
+end
+
 -- Which collision value is a whirlpool.
 --
 -- This was open for a long time because the question was being asked the wrong
@@ -5125,6 +5418,9 @@ function harness.run(rom_path, report_path, other_rom)
     rom:release()
     test_engine()
   end
+
+  -- Needs no cartridge, so it runs whether or not one loaded.
+  test_apu()
 
   test_foreign(other_rom)
 

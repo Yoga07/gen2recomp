@@ -71,7 +71,8 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** day/night clock | working — encounters and scripts |
 | Music table | located — 103 slots, 100 songs, 256 channel extents |
 | Channel bytecode | not solved — see the negative result in docs |
-| Audio playback | not started — needs a Game Boy sound chip |
+| Game Boy sound chip | working — measured, not listened to; see docs |
+| Audio playback | blocked — the chip has nothing to play until the bytecode is read |
 | Reading real .sav files | working — read from a real Crystal save |
 | **Engine:** map edge connections | working — 142 crossings |
 | **Engine:** trainer battles | working — 518 trainers across 57 classes |
@@ -100,9 +101,9 @@ Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-693 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+708 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`, and a further 18 run when a second,
-deliberately wrong cartridge is supplied — 711 in all. Nothing is claimed to be
+deliberately wrong cartridge is supplied — 726 in all. Nothing is claimed to be
 correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these
@@ -194,6 +195,7 @@ Discovered offsets are recorded in each cache's `manifest.lua`.
 main.lua           entry point; importer UI
 conf.lua           LÖVE configuration
 src/rom/           cartridge decoding — header, banking, LZ, graphics, text
+src/audio/         the Game Boy sound chip; knows nothing of the cartridge
 src/import/        import pipeline and the on-disk cache
 src/util/          byte and bit helpers
 docs/              format notes and architecture

@@ -1488,10 +1488,98 @@ to watch the sound registers, or the note pitches recovered by ear against a
 recording. Neither is bytecode archaeology, which is what this project is set up
 to do.
 
-And beyond the language there is still the chip — four channels of square, wave
-and noise, synthesised sample by sample. `playsound`, `cry` and `playmusic`
-remain among the commands the interpreter steps over, and the test output still
-names them.
+## The sound chip
+
+The chip exists now. It is the one part of the audio problem that needed no
+reverse engineering at all: the hardware is documented, so it can be written
+from the specification and then measured. Two square channels, a 32-sample
+wavetable, a noise generator, the 512 Hz frame sequencer that drives lengths,
+sweep and envelopes, and the stereo mixer.
+
+It takes register writes addressed the way the hardware is, `$FF10` to `$FF3F`,
+so a trace lifted from an emulator could be replayed into it without
+translation — which matters, because that is one of the two routes left for the
+channel bytecode.
+
+### Why it is not stepped one clock at a time
+
+The master clock is 4194304 Hz against an output of 44100, so a cycle-accurate
+loop would run 95 iterations per sample and 4.2 million per second of audio.
+Each unit keeps a countdown instead and the chip advances in chunks to whatever
+happens next, which for a 440 Hz square is a few thousand steps a second.
+
+That has a second benefit worth more than the speed. A chunk is by construction
+a span over which nothing changes, so the output level can be accumulated
+multiplied by its duration and divided at the end of the sample — **an exact box
+filter over the sample period, for free**. Point-sampling a square wave at
+44.1 kHz aliases audibly; this does not.
+
+### A sound chip makes a noise either way
+
+This is the failure mode nothing else in the project has. Every other decoder is
+checked against content known independently, and a wrong answer produces
+garbage. A wrong sound chip produces *sound*, and "I can hear something" is the
+audio equivalent of the extent measure that scored a table of zeros perfectly.
+
+So nothing is judged by ear. Ask for 440 Hz and the output is measured for
+440 Hz by counting zero crossings; ask for a 12.5% duty cycle and the output is
+measured for how long it stays above zero; the shift register's period is
+counted exactly, against numbers the hardware fixes at 32767 and 127.
+
+| | asked for | measured |
+|---|---|---|
+| frequency | the hardware's `131072/(2048-n)` | within **0.037%** |
+| duty cycles | 0.125 / 0.25 / 0.5 / 0.75 | 0.127 / 0.251 / 0.500 / 0.749 |
+| noise, 15-bit | period 32767 | **32767** |
+| noise, 7-bit | period 127 | **127** |
+| length of 32 | silence at 0.1250s | 0.1277s |
+
+### The capacitor is not a refinement
+
+The measurements found a missing piece of hardware on the first run, which is
+the whole reason for taking them. A falling envelope kept a **constant** peak
+amplitude.
+
+The chip was right and the model was incomplete. A channel whose digital level
+is 0 is not silent: its DAC holds a steady voltage at the bottom of its range.
+What makes that silence is the capacitor on the way out of the chip, which
+passes changes and blocks anything constant. Without one, a falling envelope
+does not shrink the waveform towards zero — it slides it downwards towards a
+floor that never moves, so the loudness never changes. Every channel switching
+on or off would also have stepped the whole mix and clicked.
+
+One pole of high-pass, with the charge factor the hardware's own time constant
+gives, and the envelope falls to nothing where it should. There is now a test
+that a 12.5% duty tone — the least symmetric one available — averages to within
+0.005 of zero.
+
+### Two failures that were the measurement's fault
+
+Worth recording, because telling "the code is wrong" from "the question is
+wrong" is most of the work in this project.
+
+**The seven-bit shift register appeared to have no period at all.** It does, but
+what repeats is the audible sequence rather than the whole register. In
+seven-bit mode bits 0 to 6 form a closed register and bits 7 to 14 become a
+delay line with no feedback into them, fed by a sequence whose longest run of
+ones is shorter than eight — so the full fifteen bits can never all be set again
+and never revisit the value a trigger loads, while the output carries on
+repeating every 127 shifts. Measuring the register said "no period"; measuring
+what the channel actually emits says 127.
+
+**A note with a length appeared not to stop.** Switching a channel off steps the
+mix, and the capacitor answers a step with a decaying transient, so a window
+beginning at the moment of the cut is never silent however correct the chip is.
+Moving the window would have been fitting the test to the answer. Measuring
+*when* the sound ends instead tests the length counter's timing, which is the
+thing worth knowing, and it lands within a block of the exact eighth of a second
+that 32 ticks at 256 Hz gives.
+
+### What is still missing
+
+The chip is a chip. Nothing drives it yet, because what would drive it is the
+channel bytecode, and that is still the wall. `playsound`, `cry` and `playmusic`
+remain among the commands the interpreter steps over.
 
 ### Movement
 
