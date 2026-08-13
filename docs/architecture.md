@@ -1654,11 +1654,85 @@ Moving the window would have been fitting the test to the answer. Measuring
 thing worth knowing, and it lands within a block of the exact eighth of a second
 that 32 ticks at 256 Hz gives.
 
-### What is still missing
+## The sequencer, and playing the cartridge's music
 
-The chip is a chip. Nothing drives it yet, because what would drive it is the
-channel bytecode, and that is still the wall. `playsound`, `cry` and `playmusic`
-remain among the commands the interpreter steps over.
+The last link: commands in, register writes out. It runs on the hardware's own
+clock — the sound engine was called once per rendered frame, 59.7 times a
+second — and each channel counts a note's duration down in frames, parsing the
+next commands when it reaches zero. Control flow is real: `sound_call` pushes,
+`sound_ret` pops, `sound_loop` counts, and a loop count of zero repeats forever,
+which is correct and is why rendering has to bound the run rather than wait for
+an end.
+
+**99 of the 100 songs play**, striking 42,253 notes. The one that does not is
+song 0, which produces nothing at all.
+
+### Being clear about what is faithful and what is not
+
+This matters more here than anywhere else in the project, because a wrong
+sequencer still produces music and the difference stays a matter of taste until
+somebody checks.
+
+**From the cartridge**: the command stream, the per-channel state, the control
+flow, the volume envelopes, the duty cycles, the note lengths and the tempo.
+
+**Ours**: the pitch of a note — see below.
+
+**Stand-ins**: the wave channel's instrument and the noise channel's drum kit.
+Both are chosen by tables this project has not located, so channel 3 gets one
+fixed waveform and channel 4 one fixed noise colour. The melody and harmony are
+on the two pulse channels and those are real; the other two are placeholders and
+should be listened to as such.
+
+### The pitch table is not there, or not in any shape worth guessing at
+
+A sequencer needs twelve numbers, one per semitone. Twelve numbers in equal
+temperament are an extremely sharp signature and need nothing borrowed, so this
+should have been easy. It was not.
+
+Four readings were searched across the whole cartridge — the stored value rising
+and falling, and 2048 minus it rising and falling — and none produced twelve
+consecutive words in equal temperament. Thresholding each step is the wrong tool
+where the numbers are small, because rounding a period to a whole number can
+move a ratio several percent, so every offset in the ROM was then *fitted* as an
+octave of periods instead: if twelve words are one octave, `p[i] * 2^(i/12)` is
+the same number for every `i`.
+
+**The best fit anywhere in two megabytes is 13.8% off**, and it is a sine table.
+
+The near-miss on the way is worth keeping, because it is exactly the shape of
+error this document collects. A run of **23 consecutive semitone-sized steps**
+turned up at `0x013BC4` and was rejected by the octave check. It is a table of
+perfect squares — 23², 24², 25² and so on — and the ratio of consecutive squares
+drifts through 1.0595 right about where that table sits. Every individual step
+looked like a semitone; twelve of them did not make an octave.
+
+So pitches are computed from equal temperament in our own code, and that is
+recorded as a deviation rather than dressed up as a finding.
+
+### The octave mapping is not a free choice
+
+Where Gen 2's octave 1 sits in real pitch is fixed by the chip. Its lowest note
+is 64 Hz, so octave 1 cannot be scientific octave 1 at 32.7 Hz — the register
+would have to be negative. Octave 1 is used 247 times in this cartridge, so it
+has to be playable, and the lowest mapping that works is scientific octave 2.
+
+That is checkable rather than merely arguable, and the check is the whole
+corpus: **of 42,253 notes struck across every song, not one asks for a pitch the
+chip cannot produce.** A mapping shifted either way would push the top or the
+bottom off the end of the register range. The test asserts that count at zero.
+
+### Playing it is the best test the width table will ever get
+
+The widths are bounded from above by the byte layout and not at all from below,
+because a width one too small is read as a note and a note is one byte. But a
+note is not *silent*. A width that is really smaller does not shift anything —
+it plays an extra pitch at an extra moment, on top of the music, for every
+occurrence of that command.
+
+That is inaudible to a walk and obvious to a listener, which makes rendering the
+songs a sharper instrument than anything in the byte layout, and the only one
+available for the direction the layout cannot see.
 
 ### Movement
 

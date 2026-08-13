@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 55 commits in, 716 tests passing
-against Crystal and none failing — 734 with a second, deliberately wrong
+Written at commit `6db0197` and updated since, 56 commits in, 723 tests passing
+against Crystal and none failing — 741 with a second, deliberately wrong
 cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
@@ -56,7 +56,7 @@ love . --shot <png> <mode>
 love . --probe-<name> <rom> <report> [extra]
 ```
 
-There are 39 probes. They are diagnostics kept from each investigation, not
+There are 42 probes. They are diagnostics kept from each investigation, not
 tests — `--probe-vm`, `--probe-channels`, `--probe-terrain` and `--probe-time`
 are the ones most likely to be useful again. `--shot <mode>` renders one frame
 of the running game and exits; the modes are listed in `main.lua` and cover
@@ -160,7 +160,7 @@ cures, and reading a real `.sav`.
 | | state |
 |---|---|
 | Badges | tracked and gated, but nothing awards them |
-| Audio playback | the chip is written; the channel bytecode is what is left |
+| Audio in the game | it renders to a file; nothing plays it while you walk |
 | `special` routines | 127 of them, assembly, not runnable from bytecode |
 | Unown's 26 forms | pic table locator does not find them |
 
@@ -174,13 +174,16 @@ problems and only one of them is the wall:
 
 1. **The tables.** The music table is done — 103 slots, 100 songs, 256 channel
    extents. It read 59 until the scripts were noticed indexing past its end.
-2. **The channel bytecode.** The wall. The extent measure is degenerate as a
-   *search objective* — width zero is admissible, so a table of zeros scores
-   perfectly — but it is a perfectly good *test of a fixed hypothesis*. A width
-   table proposed from outside, from the disassembly the script opcodes already
-   came from or from an emulator's writes to `$FF10`–`$FF3F`, either walks all
-   256 extents exactly or does not, and cannot bend itself to fit. That is the
-   route, and it is the same one the script opcodes took.
+2. **The channel bytecode.** Widths are in `src/rom/music_ops.lua`, borrowed
+   from the pokecrystal audio macros the way the script opcodes were. They score
+   256 of 256 boundaries and 1045 of 1045 resolving addresses — **and that is
+   bounded from above only.** A width one too large is caught; a width one too
+   small is invisible, because the operand is then read as a note and a note is
+   one byte, so the walk covers the same distance. An earlier version of this
+   file claimed the measure was sound for a fixed hypothesis. It is not, and
+   that is retracted. 27 of the 48 commands never appear in the corpus at all.
+   The remaining instrument for the direction the layout cannot see is
+   **listening**, because a width one too small plays a spurious note.
 3. **The sound chip.** ~~Not started~~ **done**, in `src/audio/apu.lua`. Four
    channels, the frame sequencer, the mixer and the output capacitor. It takes
    register writes at `$FF10`–`$FF3F`, so an emulator trace could be replayed
@@ -190,10 +193,20 @@ problems and only one of them is the wall:
    trace into the save directory; the WAV has since been played back and
    confirmed as sounding right, which is a check on the things no measurement
    was written for rather than a substitute for the measurements.
-4. **Wiring it in.** Small. `playsound` ×189, `playmusic` ×79, `cry` ×70 and
-   `waitsfx` ×85 are currently in the interpreter's ignored list, and map
-   headers already name a music id. `cry` operands run to 250, so they are
-   species ids rather than indices into a cry table.
+4. **The sequencer.** Done, in `src/audio/sequencer.lua`. Runs on the frame
+   clock, keeps the per-channel state, follows calls, loops and jumps. 99 of the
+   100 songs play and 42253 notes are struck. `--probe-song` renders any of them
+   to a WAV. Two caveats worth knowing before trusting what you hear: the wave
+   channel's instrument and the noise channel's drum kit are **stand-ins**,
+   because neither table has been located, so channels 3 and 4 are placeholders
+   while 1 and 2 are real; and the **pitch table is not in the cartridge** in any
+   shape found so far, so pitches are computed from equal temperament here. See
+   `--probe-pitch` for that negative result — the best fit anywhere in two
+   megabytes is 14% off and is a sine table.
+5. **Wiring it into the game.** Not done. `playsound` ×189, `playmusic` ×79,
+   `cry` ×70 and `waitsfx` ×85 are still in the interpreter's ignored list, and
+   map headers already name a music id, so the pieces are all present. `cry`
+   operands run to 250, so they are species ids rather than cry-table indices.
 
 ### The one unverified claim
 

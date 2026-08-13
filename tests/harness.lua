@@ -2615,6 +2615,93 @@ local function test_music_ops(rom)
   check("most of the table is never exercised by this cartridge", used < 32)
 end
 
+-- Playing the cartridge's music: commands in, register writes out.
+local function test_sequencer(rom)
+  log("\n== sequencer ==")
+
+  local music = require("src.rom.music")
+  local sequencer = require("src.audio.sequencer")
+
+  -- Pitch first, because it is the part that is ours rather than the
+  -- cartridge's and therefore the part most worth pinning down.
+  --
+  -- The chip's register value v gives 131072/(2048-v) Hz, so a register can be
+  -- turned back into a frequency and checked against the note it claims to be.
+  local function hz_of(value)
+    return 131072 / (2048 - value)
+  end
+
+  -- Gen 2 octave 3, pitch 10, is A. Under the mapping this uses that is
+  -- scientific octave 4, which is concert A at 440 Hz.
+  local a440 = sequencer.frequency(10, 3)
+  check("concert A has a register value", a440 ~= nil)
+  if a440 then
+    log("        octave 3 pitch 10 -> register %d -> %.1f Hz", a440,
+      hz_of(a440))
+    check("and it comes out at 440 Hz", math.abs(hz_of(a440) - 440) < 3,
+      ("%.1f"):format(hz_of(a440)))
+  end
+
+  -- An octave up doubles the frequency, which is the one relation that has to
+  -- hold whatever the mapping is.
+  local low = sequencer.frequency(1, 3)
+  local high = sequencer.frequency(1, 4)
+  check("an octave up doubles the frequency",
+    low and high and math.abs(hz_of(high) / hz_of(low) - 2) < 0.02)
+
+  -- A semitone is the twelfth root of two, and rounding to an eleven-bit
+  -- register must not swamp it.
+  local c = sequencer.frequency(1, 4)
+  local c_sharp = sequencer.frequency(2, 4)
+  check("a semitone is a semitone",
+    math.abs(hz_of(c_sharp) / hz_of(c) - 2 ^ (1 / 12)) < 0.01)
+
+  local located = music.locate(rom)
+  if not located then
+    log("  SKIP  the music table did not locate")
+    return
+  end
+
+  -- Now play every song in the cartridge, without rendering any audio. The
+  -- measure that matters is how many notes ask for a pitch the chip cannot
+  -- produce: the octave mapping is ours, so if it were shifted the bottom or
+  -- top of the range would fall off the end and this would not be zero.
+  local silent = { rate = 44100 }
+  function silent:write() end
+  function silent:generate() return {} end
+
+  local notes, out_of_range, played, quiet = 0, 0, 0, 0
+  for _, song in ipairs(located.songs) do
+    if not song.unparsed then
+      local player = sequencer.new(rom.data, silent)
+      local channels = {}
+      for index, address in ipairs(song.channels) do
+        channels[index] = song.bank * 0x4000 + (address - 0x4000)
+      end
+      player:play(channels, song.bank)
+      for _ = 1, 900 do
+        if not player:frame() then
+          break
+        end
+      end
+      notes = notes + player.notes_played
+      out_of_range = out_of_range + player.out_of_range
+      if player.notes_played > 0 then
+        played = played + 1
+      else
+        quiet = quiet + 1
+      end
+    end
+  end
+
+  log("        %d songs play, %d produce nothing, %d notes struck",
+    played, quiet, notes)
+  check("almost every song plays something", played >= 95)
+  check("and there are tens of thousands of notes to judge on", notes > 20000)
+  check_equal("no note asks for a pitch the chip cannot produce",
+    out_of_range, 0)
+end
+
 -- The sound chip.
 --
 -- A sound chip has a failure mode nothing else here has: **it makes a noise
@@ -5542,6 +5629,7 @@ function harness.run(rom_path, report_path, other_rom)
     test_sav(found and found.base_stats and found.base_stats.records)
     test_music(rom)
     test_music_ops(rom)
+    test_sequencer(rom)
     test_movement(rom, map_result)
     test_script_vm(rom, map_result)
     test_hidden_items(rom, map_result,
