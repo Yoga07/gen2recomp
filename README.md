@@ -71,7 +71,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** day/night clock | working — encounters and scripts |
 | Music table | located — 103 slots, 100 songs, 256 channel extents |
 | Channel bytecode | not solved — see the negative result in docs |
-| Game Boy sound chip | working — measured, not listened to; see docs |
+| Game Boy sound chip | working — measured against the hardware, and heard |
 | Audio playback | blocked — the chip has nothing to play until the bytecode is read |
 | Reading real .sav files | working — read from a real Crystal save |
 | **Engine:** map edge connections | working — 142 crossings |

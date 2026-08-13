@@ -1534,6 +1534,25 @@ counted exactly, against numbers the hardware fixes at 32767 and 127.
 | noise, 7-bit | period 127 | **127** |
 | length of 32 | silence at 0.1250s | 0.1277s |
 
+### ...and then somebody listens anyway
+
+The demo `--probe-apu` writes was played back and reported as sounding right.
+That is worth recording and worth being precise about, because it is a
+different kind of evidence from everything above rather than a stronger one.
+
+Measurement is what establishes the chip is correct: it can say that 440 Hz
+came out at 440 Hz and that the shift register repeats after exactly 32767
+shifts. An ear cannot say either of those things. What an ear catches is the
+whole class of faults that are obvious in aggregate and invisible to any
+particular measurement — a channel silently missing from the mix, clicks
+between notes, a stereo image collapsed to one side, aliasing that the numbers
+pass over because they only ever looked at zero crossings.
+
+So the order matters and it is the order used here: measure first, because
+"it makes a noise" proves nothing; listen afterwards, because a chip that
+satisfies every measurement written for it can still be wrong in a way nobody
+thought to measure.
+
 ### The capacitor is not a refinement
 
 The measurements found a missing piece of hardware on the first run, which is

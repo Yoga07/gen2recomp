@@ -180,7 +180,9 @@ problems and only one of them is the wall:
    into it unmodified. Verified by measurement rather than by ear — frequency
    within 0.037%, both noise periods exact — because a sound chip makes a noise
    whether or not it is right. `--probe-apu` writes a WAV and an oscilloscope
-   trace into the save directory.
+   trace into the save directory; the WAV has since been played back and
+   confirmed as sounding right, which is a check on the things no measurement
+   was written for rather than a substitute for the measurements.
 4. **Wiring it in.** Small. `playsound` ×189, `playmusic` ×79, `cry` ×70 and
    `waitsfx` ×85 are currently in the interpreter's ignored list, and map
    headers already name a music id. `cry` operands run to 250, so they are
