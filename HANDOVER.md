@@ -266,23 +266,30 @@ maps, 1241 warps, encounters, learnsets, trainers, marts, the machine list, the
 status cures, the Pokédex entries, the music table, the sound effects, the
 cries. Whirlpool comes out as collision `$24` on both.
 
-Four things fail on Gold, and each is honest about it rather than wrong:
+Four things failed on Gold when it was first imported. Three are now fixed, and
+both fixes were the same mistake: a rule fitted to Crystal that happened to be
+about the cartridge rather than about the data.
 
-| | why |
+| | what it was |
 |---|---|
-| font | 4 offsets satisfy the layout; refuses to guess. Crystal's font is the one **hardcoded** offset and it does not apply here, so the blind search runs and correctly declines. |
-| std_scripts | longest run of pointers is 6. The table is elsewhere or shaped differently in Gold. |
-| obstacles | needs the standard scripts, so it is blocked by the row above rather than broken. |
-| sprites | no offset validated as a pic pointer table — the bank bias that Crystal uses is `$36` and Gold's differs. |
+| sprites | **fixed.** No single bank bias decodes Gold's pic table — its pic region has a hole where banks `$13` and `$14` hold other data, and the displaced pics went to `$1F`, `$20` and `$2E` under the skipped bank numbers. `pics.locate` now solves the whole stored-bank-to-real-bank mapping and refuses when two banks fit equally well. All 250 sprites decode, in colour. |
+| std_scripts | **fixed.** The table was found and then discarded by "half the entries must read as real routines": Gold's standard scripts are short, so 13 of 46 clear that where 37 of Crystal's 52 do. It is now found by the structural fact both share — the table starts at the very beginning of the bank all its entries name — at `0x100000` in bank `$40`, 46 entries. |
+| obstacles | **fixed** by the row above. Gold's cut tree is sprite 89 and its boulder sprite 90. |
+| font | still refuses: 4 offsets satisfy the layout. Crystal's font is the one **hardcoded** offset and it does not apply here, so the blind search runs and correctly declines. This is the one honest failure left. |
 
-Two more numbers are lower and worth a look rather than a shrug: **446 of 2060**
-scripts read as text against Crystal's 893 of 2200, and **258** blocks
-unreadable against Crystal's 21. Some of that is the missing standard-script
-table; whether all of it is has not been checked.
+The lesson worth carrying: both bugs reported a number that pointed away from the
+problem. "No offset validated as a pic pointer table" and "the longest run was 6"
+both read as *the data is not there*, when in both cases the data had been found
+and rejected. When a locator refuses, ask what it scored before believing where
+it says the trouble is.
 
-So the next Gold job, in order: the pic table's bank bias, then the
-standard-script table, which unblocks obstacles and probably much of the script
-shortfall.
+**The next Gold job is the text.** 446 of 2060 scripts yield text against
+Crystal's 893 of 2200, and 261 blocks are unreadable against Crystal's 21.
+Fixing the standard scripts did not move either, which is itself the clue: Gold's
+scripts stop at `farjumptext with no readable text` 471 times and `jumptext with
+no readable text` 192 times, and Gold's script-text breakdown shows
+`farjumptext x15` where Crystal's shows none at all. Gold leans on the far text
+commands and Crystal barely does, so the far-text path is where to look.
 
 The *other* half of that claim — that a dump which would decode into nonsense
 fails loudly — is now tested rather than asserted, using the Red image as an
