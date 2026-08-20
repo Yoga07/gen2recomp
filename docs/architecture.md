@@ -52,16 +52,37 @@ Data is serialised as Lua source rather than a binary blob because it is
 diffable. Comparing two imports — or an import against a disassembly — is a
 routine operation while the decoders are being built.
 
-## Two traps in the Gen 2 sprite format
+## Traps in the Gen 2 sprite format
 
-Both cost real time to find, and neither fails loudly if you get it wrong.
+None of these fails loudly if you get it wrong.
 
 **Pic pointers carry a biased bank.** Entries are `(bank, address)`, but every
-pic lives in a contiguous run of high banks, so the stored bank is small and the
-game adds a constant — `$36` in Crystal — before switching. A reader that
-treats the byte as a literal bank finds nothing at all, which is at least
-honest. `src/rom/pics.lua` tries the known constant first and solves for it
-otherwise.
+pic lives in a run of high banks, so the stored bank is small and the game adds
+a constant — `$36` in Crystal — before switching. A reader that treats the byte
+as a literal bank finds nothing at all, which is at least honest.
+
+**And on Gold the constant is not the whole answer.** No single constant decodes
+more than 197 of Gold's 251 fronts. The reason is a hole in the middle of the
+pic region: Gold's pics occupy banks `$12` and `$15`–`$1E`, and banks `$13` and
+`$14` in between hold other data. The pics that would have gone there were put
+in `$1F`, `$20` and `$2E`, and the table records them under the two bank numbers
+the region skipped, plus one more. Crystal has no such hole and needs no such
+fix, which is why this went unnoticed until a second cartridge was imported.
+
+`src/rom/pics.lua` therefore solves for the mapping instead of assuming it. It
+finds the constant that explains the most entries, and then, for each stored
+bank the constant fails on, searches every bank in the cartridge for one where
+*every* pointer naming that bank decodes. Gold's three problem banks have 26, 25
+and 7 entries and each has exactly one such bank; a wrong guess has none. Where
+two banks both qualify, the locator refuses rather than picking — which is not
+hypothetical, since Crystal's stored `$23` decodes in both `$59` and `$5A`, and
+is only unambiguous because the constant already explained it.
+
+The result is checked by eye as well as by size, because size is a weak test: a
+pointer into the wrong bank that lands on some *other* species' pic decodes
+perfectly and is still wrong. `--probe-sheet` renders all 251 fronts into one
+contact sheet, and the entries whose banks had to be solved for — Butterfree,
+Raichu, Magnemite — are indistinguishable from the rest.
 
 **Front pics are longer than their footprint.** A species' front pic does not
 decompress to `width * height * 16` bytes. Crystal animates front sprites and
@@ -71,7 +92,12 @@ decompresses to 688 bytes where its 5x5 footprint accounts for only 400. 250 of
 A validator demanding an exact size rejects the real table and then happily
 accepts a false one 22 entries later.
 
-A third trap is subtler: pic tiles are stored **column-major**. Laying them out
+Gold carries no frames at all — 0 of 251 — because front-sprite animation is a
+Crystal addition. That is a useful independent check on the bank mapping above:
+the same code reads Gold's table as 251 unanimated pics and Crystal's as 250
+animated ones, without being told which cartridge it has.
+
+One more trap is subtler: pic tiles are stored **column-major**. Laying them out
 row-major yields a sprite that is recognisably the right creature and entirely
 scrambled, which is easy to mistake for a palette problem.
 

@@ -21,7 +21,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | LZ graphics decompression | working |
 | 2bpp tile and BGR555 palette decoding | working |
 | Species names, move names, base stats, move data | working |
-| Pokémon front and back sprites | working, 250 of 251 species |
+| Pokémon front and back sprites | working, 250 of 251 species — bank mapping solved, not assumed |
 | Sprite palettes, normal and shiny | working |
 | Tilesets: graphics, blocks, collision | working, 31 tilesets |
 | Maps: headers, dimensions, block data, connections | working, 388 slots / 384 usable |
@@ -109,8 +109,8 @@ across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
 746 tests pass against Crystal (USA/Europe) rev 1, SHA-1
-`f2f52230b536214ef7c9924f483392993e226cfb`, and a further 18 run when a second,
-deliberately wrong cartridge is supplied — 764 in all. Nothing is claimed to be
+`f2f52230b536214ef7c9924f483392993e226cfb`, and a further 19 run when a second,
+deliberately wrong cartridge is supplied — 765 in all. Nothing is claimed to be
 correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these
@@ -197,11 +197,21 @@ See the architecture notes.
 The **first** half is no longer only a design claim either. A Pokémon Gold
 cartridge has been imported, and every signature table located — at completely
 different offsets from Crystal's, which is the whole point of searching rather
-than hardcoding. Four things fail on Gold, and each says so rather than
-guessing: the font, whose Crystal offset is the one hardcoded value in the
-project, so the blind search runs and declines between four candidates; the
-standard-script table; the obstacle detector that depends on it; and the sprite
-pic table, whose bank bias is not Crystal's. See the handover.
+than hardcoding. All 250 of its sprites decode, in colour, from Gold's own
+palettes.
+
+Gold also broke an assumption worth recording. Its pic pointers are biased by a
+constant like Crystal's, except that no constant works: Gold's pic region has a
+hole where two banks hold other data, and the pics displaced by it are recorded
+under the bank numbers the region skipped. The locator now solves for the whole
+stored-bank-to-real-bank mapping rather than for one number, refusing when two
+banks fit equally well. Crystal's answer comes back as the uniform `+$36` it
+always was.
+
+Three things still fail on Gold, and each says so rather than guessing: the
+font, whose Crystal offset is the one hardcoded value in the project, so the
+blind search runs and declines between four candidates; the standard-script
+table; and the obstacle detector that depends on it. See the handover.
 
 Discovered offsets are recorded in each cache's `manifest.lua`.
 

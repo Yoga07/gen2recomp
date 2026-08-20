@@ -271,6 +271,21 @@ local function test_sprites(rom, base_stats)
     table_info.offset, math.floor(table_info.offset / 0x4000),
     table_info.bias, table_info.stride)
 
+  -- A cartridge whose pic region is not one unbroken run of banks needs more
+  -- than the constant, and which banks were remapped is the interesting part of
+  -- the answer, so say so rather than only reporting the constant.
+  if table_info.overrides then
+    local moved = {}
+    for stored, physical in pairs(table_info.overrides) do
+      if physical ~= stored + table_info.bias then
+        moved[#moved + 1] = ("$%02X->$%02X"):format(stored, physical)
+      end
+    end
+    table.sort(moved)
+    log("        banks the constant did not explain: %s",
+      #moved > 0 and table.concat(moved, " ") or "none")
+  end
+
   -- Walk every species. Each front pic must decompress to a tile-aligned size
   -- of at least its recorded footprint, and each back pic to exactly 6x6.
   local front_failures, back_failures = {}, {}
@@ -5835,6 +5850,11 @@ end
 -- tables of its own for moves, items and base stats. It is exactly what would
 -- decode into plausible garbage if validation were only as strong as signature.
 -- Three of the six named tables do have their signature occur in it.
+
+-- The real cartridge's base stats, kept past its release so the adversarial
+-- run below can hand them to the searches that need footprints to work at all.
+local gen2_stats
+
 local function test_foreign(path)
   log("\n== a cartridge that is not Gen 2 ==")
   if not path then
@@ -5896,6 +5916,18 @@ local function test_foreign(path)
         return require("src.rom.cures").locate(other,
           other_names and other_names.records)
       end },
+    -- The pic search is the one whose gate had to be loosened to admit Gold,
+    -- whose table has a few entries in banks the constant does not explain. A
+    -- loosened gate is exactly the kind of change that quietly starts accepting
+    -- things, so it is given the real base stats — the footprints that make the
+    -- search possible at all — and asked to find a Gen 2 pic table in a
+    -- cartridge that has none.
+    { "pics", function()
+        if not gen2_stats then
+          return nil
+        end
+        return require("src.rom.pics").locate(other, gen2_stats)
+      end },
   }
 
   for _, entry in ipairs(standalone) do
@@ -5927,6 +5959,7 @@ function harness.run(rom_path, report_path, other_rom)
     test_addressing(rom)
     test_lz_commands()
     local found = test_tables(rom)
+    gen2_stats = found and found.base_stats and found.base_stats.records
     test_sprites(rom, found and found.base_stats)
     test_palettes(rom, found and found.species_names and found.species_names.records)
     local tileset_result = test_tilesets(rom)
