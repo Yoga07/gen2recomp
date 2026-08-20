@@ -1137,6 +1137,75 @@ nearly every entry to decode as script bytecode reaching a terminator, which is
 52 of 52 on Crystal and 41 of 46 on Gold, and reports the strict count as
 information rather than asserting on it.
 
+### Crystal has a script command Gold does not
+
+Gold read text for 446 of 2060 scripts against Crystal's 893 of 2200, and left
+261 blocks unreadable against Crystal's 21. Fixing the standard-script table
+moved neither number, which was the useful clue: the shortfall was not in what
+the scripts pointed at but in how they were being read.
+
+`farjumptext` sits at `$52` in Crystal's command list, and Gold's list does not
+have it, so **every command above `$52` is one number lower on Gold.**
+`applymovement` is `$69` on Crystal and `$68` on Gold; `end` is `$91` and `$90`.
+Crystal never uses `$52` in a map script, so the cartridge that has the command
+offers no evidence about it, and a project built entirely on Crystal had no way
+to notice.
+
+The failure mode is worth dwelling on, because it is the opposite of the one
+this project is built to produce. Nothing refused. Nothing overran conspicuously.
+The walk still landed somewhere plausible, the text pointers simply came out of
+the wrong bytes, and the import reported a smaller number in a place where a
+smaller number is not obviously wrong. **A search that refuses is a good day; a
+decoder that quietly reads the wrong bytes is the bad one.**
+
+Three measurements identify the shift, each sharper than the last:
+
+- The project's own width inference, which learns from where scripts end rather
+  than from any specification, reads `$52` as taking two operand bytes on Gold
+  where the table says three. Two bytes is a near pointer and three is a far one.
+- Walks land exactly on their script boundary 787 times under the shorter list
+  against 463 under Crystal's, while doing the same to Crystal drops it from 833
+  to 368.
+- Every one of Gold's 288 movement blocks decodes under the shorter list.
+
+That last one took a detour worth recording. The test that counts movement
+blocks named `$69` and `$6A` directly, so with the shift applied it was reading
+Crystal's `applymovement` out of Gold's renumbered scripts, and reported 6 of
+341. That looks exactly like evidence *against* the shift, and it briefly was
+taken as such — a competing "only `$52` differs" model was built and measured on
+the strength of it. It was evidence against the test. The tell was that the
+competing model left 261 blocks unreadable where the shift left 21: a model that
+fixes one number and no others is not explaining anything.
+
+So the list is chosen by measurement rather than by which game the header says
+it is. `script_ops.select` scores both lists against the cartridge's own scripts
+and adopts the winner, and everything keyed by opcode — which commands carry
+text, which carry a branch target, which carries a movement block, which one
+ends a script — is derived from the chosen list by **name** rather than written
+as a number. Three separate places had numbers written into them, and all three
+were silent when wrong.
+
+The results, with Crystal for scale:
+
+| | before | after | Crystal |
+| --- | --- | --- | --- |
+| scripts yielding text | 446 of 2060 | 824 of 2060 | 893 of 2200 |
+| unreadable blocks | 261 | 21 | 21 |
+| text boxes in a full run | 660 | 1630 | 2147 |
+| movement blocks decoded | 80 of 341 | 288 of 288 | 353 of 353 |
+| standard scripts reading as routines | 13 of 46 | 27 of 46 | 37 of 52 |
+
+Read out rather than counted, Gold's standard scripts stopped being `(no text)`
+and became bookshelves: "It's full of difficult books.", "Heal Your POKéMON!
+POKéMON CENTER", "TEAM ROCKET OATH".
+
+That last row is an honest footnote. The standard-script locator was rewritten
+in the previous commit because 13 of 46 entries reading as routines failed a
+"half of them must" threshold. With the command list right, 27 of 46 do, and the
+old threshold would have passed. The rewrite still stands on its own — it turns
+on where the table sits rather than on how long a cartridge's routines happen to
+be — but it was solving a symptom of this.
+
 ## The machine list, and why badges are not earnable yet
 
 The items are named TM01 to TM50 and HM01 to HM07, which says nothing about

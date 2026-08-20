@@ -22,6 +22,8 @@ local trainers = require("src.rom.trainers")
 local marts = require("src.rom.marts")
 local script_decode = require("src.rom.script_decode")
 local std_scripts = require("src.rom.std_scripts")
+local script_ops = require("src.rom.script_ops")
+local script_table = require("src.rom.script_table")
 local music = require("src.rom.music")
 local machines = require("src.rom.machines")
 local obstacles = require("src.rom.obstacles")
@@ -529,6 +531,18 @@ function importer.run(path, progress)
       failed.maps = map_err
     else
       map_summary.count = #map_result.headers
+      -- Which script command list this cartridge was built with, decided by
+      -- walking its own scripts rather than by which game the header says it
+      -- is. Everything downstream that reads a script -- map text, the standard
+      -- scripts, the interpreter -- depends on this being right, so it happens
+      -- before any of them.
+      local variant, script_scores = script_ops.select(rom,
+        script_table.collect_entries(rom, map_result, events))
+      step(("script commands: the %s list (%d exact landings against %d)")
+        :format(variant, script_scores[variant],
+          script_scores[variant == "crystal" and "gold" or "crystal"]))
+      offsets.script_variant = variant
+
       step(("extracting %d maps"):format(map_summary.count))
 
       local records = {}

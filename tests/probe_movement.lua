@@ -21,8 +21,10 @@ local function log(fmt, ...)
   report[#report + 1] = select("#", ...) > 0 and fmt:format(...) or fmt
 end
 
-local APPLYMOVEMENT = 0x69
-local APPLYMOVEMENT_LAST = 0x6A
+-- Filled in from whichever command list the cartridge turns out to use: these
+-- are $69 and $6A on Crystal and one lower on Gold.
+local APPLYMOVEMENT
+local APPLYMOVEMENT_LAST
 
 function probe.run(rom_path, report_path)
   report = {}
@@ -37,6 +39,11 @@ function probe.run(rom_path, report_path)
 
   local tileset_result = tilesets.locate(rom)
   local map_result = maps.locate(rom, tileset_result.count)
+  local script_ops = require("src.rom.script_ops")
+  local script_table = require("src.rom.script_table")
+  script_ops.select(rom, script_table.collect_entries(rom, map_result, events))
+  APPLYMOVEMENT, APPLYMOVEMENT_LAST =
+    script_decode.targets_for(select(3, script_ops.widths()))
 
   local entries = {}
   for _, header in ipairs(map_result.headers) do

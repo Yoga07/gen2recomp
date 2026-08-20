@@ -52,10 +52,11 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** battles started by scripts | working — wild and trainer |
 | Standard scripts | working — 52 in Crystal, 46 in Gold, found by anchoring |
 | **Engine:** yes-or-no prompts | working — 139 questions |
-| Movement blocks | working — 353 walks decoded |
+| Movement blocks | working — 353 walks in Crystal, 288 in Gold, all of them |
 | **Engine:** NPCs turn, walk and vanish | working |
 | Unown's 26 forms | not located — see `src/rom/pics.lua` |
 | **Engine:** script interpreter | working — 14558 instructions decoded |
+| Script command list | chosen by measurement — Crystal has one command Gold lacks |
 | **Engine:** status conditions and stat stages | working |
 | Items: names, prices, pockets, effects | working — 255 items |
 | Status cures: which item undoes what | working — 14 items |
@@ -108,9 +109,9 @@ Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-746 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+749 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`, and a further 19 run when a second,
-deliberately wrong cartridge is supplied — 765 in all. Nothing is claimed to be
+deliberately wrong cartridge is supplied — 768 in all. Nothing is claimed to be
 correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these
@@ -217,6 +218,27 @@ what is true of it on both — it begins at the very start of the bank all its
 entries name — and the strict count only has to beat the best run that is not
 the table, which it does by 13 to 5 and 37 to 18. That also unblocked the
 obstacle detector, so Gold's cut trees and boulders are found too.
+
+The third assumption Gold broke was the biggest, and it was hiding in plain
+sight: **Crystal carries one script command that Gold does not.** `farjumptext`
+sits at `$52` in Crystal's list, so every command above it is one number lower
+in Gold's. Crystal never uses `$52` in a map script, which is why the difference
+survived a whole project built on Crystal — the cartridge that has the command
+offers no evidence about it.
+
+Reading Gold with Crystal's list is quiet rather than loud. The walk still lands
+somewhere plausible and the text simply comes out of the wrong bytes, so the
+import reported a smaller number without ever saying anything was wrong. The
+command list is now chosen by measuring, not by asking which game it is:
+whichever list lands more of the cartridge's own scripts exactly on their
+boundary wins, which is 787 against 463 on Gold and 833 against 368 on Crystal.
+
+| | before | after | Crystal |
+| --- | --- | --- | --- |
+| scripts yielding text | 446 of 2060 | **824** of 2060 | 893 of 2200 |
+| unreadable blocks | 261 | **21** | 21 |
+| text boxes in a full run | 660 | **1630** | 2147 |
+| movement blocks decoded | 80 of 341 | **288 of 288** | 353 of 353 |
 
 One thing still fails on Gold, and it says so rather than guessing: the font,
 whose Crystal offset is the one hardcoded value in the project, so the blind

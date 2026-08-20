@@ -23,7 +23,12 @@
 local script_table = {}
 
 -- Ends a script: identified by sitting immediately before the next script 607
--- times across the game.
+-- times across a Crystal cartridge. It is only a seed -- inference bootstraps
+-- from it -- but it is a seed that has to be right, and it is not the same
+-- number on every cartridge. Crystal carries one script command that Gold does
+-- not, so Gold's `end` sits at $90 and its $91 is `reloadend`, which takes an
+-- operand. Callers that know which command list the cartridge uses should say
+-- so; this is the fallback for those that do not.
 script_table.END = 0x91
 
 -- Operands are small; anything wider than this is a misread extent.
@@ -121,10 +126,12 @@ script_table.walk = walk
 
 
 --- Infer the opcode table.
+-- @param ends the opcode that terminates a script, if the caller knows it
 -- @return { widths, terminators, learned, rounds }
-function script_table.infer(rom, sorted)
-  local widths = { [script_table.END] = 0 }
-  local terminators = { [script_table.END] = true }
+function script_table.infer(rom, sorted, ends)
+  ends = ends or script_table.END
+  local widths = { [ends] = 0 }
+  local terminators = { [ends] = true }
 
   local extents = script_table.extents(sorted)
   local rounds = 0

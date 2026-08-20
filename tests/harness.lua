@@ -27,6 +27,7 @@ local scripts = require("src.rom.scripts")
 local text = require("src.rom.text")
 local font = require("src.rom.font")
 local script_table = require("src.rom.script_table")
+local script_ops = require("src.rom.script_ops")
 local encounters = require("src.rom.encounters")
 local trainers = require("src.rom.trainers")
 
@@ -1004,6 +1005,42 @@ end
 -- none. What is checked is that the table explains the cartridge: walks land
 -- exactly on script boundaries and never overshoot. An overrun means a width is
 -- wrong, so holding that at zero is the real assertion.
+--- Which cartridge's script command list this image was built with.
+--
+-- Crystal has one command Gold does not -- `farjumptext` at $52 -- so every
+-- command above it is a different number on the two cartridges. Reading Gold
+-- with Crystal's list silently misreads a fifth of its script text, because the
+-- walk still lands plausibly and the pointers simply come out of the wrong
+-- bytes. Nothing about the header decides this; the cartridge's own scripts do.
+local function test_script_variant(rom, map_result)
+  log("\n== script command list ==")
+  if not map_result then
+    log("  SKIP  maps were not located")
+    return
+  end
+
+  local sorted = script_table.collect_entries(rom, map_result, events)
+  local variant, scores = script_ops.select(rom, sorted)
+  log("        the %s list: %d scripts land exactly on their boundary, " ..
+    "against %d for the other", variant, scores[variant],
+    scores[variant == "crystal" and "gold" or "crystal"])
+
+  -- The two lists are not close on a cartridge that has one of them. If they
+  -- were, the choice would be a coin toss dressed up as a measurement.
+  local other = scores[variant == "crystal" and "gold" or "crystal"]
+  check("one command list explains the cartridge much better than the other",
+    scores[variant] > other * 1.15,
+    ("%d against %d"):format(scores[variant], other))
+
+  -- The commands that move are the ones that matter: a text command read at the
+  -- wrong number reads text out of the wrong bytes without ever looking wrong.
+  local names = select(3, script_ops.widths())
+  check_equal("$51 is jumptextfaceplayer on either list",
+    names[0x51], "jumptextfaceplayer")
+  check_equal("$52 is the first command that moves",
+    names[0x52], variant == "crystal" and "farjumptext" or "jumptext")
+end
+
 local function test_script_table(rom, map_result)
   log("\n== script opcode table ==")
   if not map_result then
@@ -1015,16 +1052,42 @@ local function test_script_table(rom, map_result)
   local extents = script_table.extents(sorted)
   log("        %d script pointers, %d with a usable extent", total, #extents)
 
-  local inferred = script_table.infer(rom, sorted)
+  -- Seeded with the terminator from whichever command list the cartridge chose,
+  -- because the seed is the one thing inference cannot discover for itself and
+  -- $91 is `reloadend` rather than `end` on a cartridge without Crystal's extra
+  -- command.
+  local seed_names = select(3, script_ops.widths())
+  local ends
+  for opcode, name in pairs(seed_names) do
+    if name == "end" then
+      ends = opcode
+    end
+  end
+  local inferred = script_table.infer(rom, sorted, ends)
   check("inference learns a useful number of opcodes", inferred.learned >= 20,
     ("learned %d"):format(inferred.learned))
   log("        learned %d opcodes over %d rounds", inferred.learned, inferred.rounds)
 
   -- The bootstrap: 3-byte scripts fix the common openers at two operand bytes.
-  check_equal("$53 takes two operand bytes", inferred.widths[0x53], 2)
-  check_equal("$51 takes two operand bytes", inferred.widths[0x51], 2)
-  check_equal("$91 takes none and ends the script", inferred.widths[0x91], 0)
-  check("$91 is a terminator", inferred.terminators[0x91] == true)
+  -- Which opcode that is depends on the cartridge, since Crystal's list carries
+  -- one command Gold's does not and everything above it moves. Naming the
+  -- commands rather than the numbers is what makes this assertion portable --
+  -- and asserting a number here is what hid Gold's real opcode list, since
+  -- "$53 takes two operand bytes" simply failed rather than saying why.
+  local op_names = select(3, script_ops.widths())
+  local by_name = {}
+  for opcode, name in pairs(op_names) do
+    by_name[name] = opcode
+  end
+  check_equal("jumptext takes two operand bytes",
+    inferred.widths[by_name.jumptext], 2)
+  check_equal("jumptextfaceplayer takes two operand bytes",
+    inferred.widths[by_name.jumptextfaceplayer], 2)
+  -- The seed, checked to have been applied rather than discovered: inference
+  -- cannot learn its own terminator, so this guards the wiring, not the fact.
+  check_equal("end takes no operands and ends the script",
+    inferred.widths[ends], 0)
+  check("end is a terminator", inferred.terminators[ends] == true)
 
   local counts = script_table.score(rom, sorted, inferred)
   log("        walks: %d ended (%d exact), %d blocked, %d overran",
@@ -1039,8 +1102,12 @@ local function test_script_table(rom, map_result)
     counts.exact >= counts.ended * 0.9,
     ("%d of %d exact"):format(counts.exact, counts.ended))
 
+  -- Proportional rather than absolute: Gold offers 1382 scripts with a usable
+  -- extent where Crystal offers 1502, and half of each walking to completion is
+  -- the claim worth making. Crystal manages 51%, Gold 50%.
   check("a substantial share of scripts walk to completion",
-    counts.ended >= 700, ("%d of %d"):format(counts.ended, #extents))
+    counts.ended >= #extents * 0.45,
+    ("%d of %d"):format(counts.ended, #extents))
 end
 
 --- Wild encounters and trainer parties.
@@ -4818,12 +4885,21 @@ local function test_movement(rom, map_result)
   end
 
   local code = script_decode.reachable(rom, entries)
+  -- Which opcodes carry a movement block is a question for the cartridge's
+  -- command list, not a constant. This test used to name $69 and $6A, which are
+  -- applymovement and applymovementlasttalked on Crystal and need not be on
+  -- anything else. Counting the wrong instructions here reads as "the movement
+  -- blocks do not decode", which points at the decoder rather than at the
+  -- numbering, and cost real time on Gold before it was noticed.
+  local move_names = select(3, script_ops.widths())
+  local applymovement, applymovement_last = script_decode.targets_for(move_names)
 
   local blocks, decoded_ok, with_unknown, longest = 0, 0, 0, 0
   local steps_total = 0
   for _, bank_code in pairs(code) do
     for _, instruction in pairs(bank_code) do
-      if instruction.opcode == 0x69 or instruction.opcode == 0x6A then
+      if instruction.opcode == applymovement
+        or instruction.opcode == applymovement_last then
         blocks = blocks + 1
         if instruction.movement then
           decoded_ok = decoded_ok + 1
@@ -5972,6 +6048,7 @@ function harness.run(rom_path, report_path, other_rom)
     test_palettes(rom, found and found.species_names and found.species_names.records)
     local tileset_result = test_tilesets(rom)
     local map_result = test_maps(rom, tileset_result)
+    test_script_variant(rom, map_result)
     test_events(rom, map_result)
     test_ow_sprites(rom, map_result)
     test_font(rom)

@@ -283,14 +283,42 @@ both read as *the data is not there*, when in both cases the data had been found
 and rejected. When a locator refuses, ask what it scored before believing where
 it says the trouble is.
 
-**The next Gold job is the text.** 446 of 2060 scripts yield text against
-Crystal's 893 of 2200, and 261 blocks are unreadable against Crystal's 21.
-Fixing the standard scripts did not move either, which is itself the clue: Gold's
-scripts stop at `farjumptext with no readable text` 471 times and `jumptext with
-no readable text` 192 times, and Gold's script-text breakdown shows
-`farjumptext x15` where Crystal's shows none at all. Gold leans on the far text
-commands and Crystal barely does, so the far-text path is where to look.
+**The text is fixed, and it was the biggest thing wrong.** Crystal carries one
+script command that Gold does not — `farjumptext` at `$52` — so every command
+above it is one number lower on Gold. `script_ops.select` now measures which
+list a cartridge uses instead of assuming Crystal's, and everything keyed by
+opcode is derived by name. Gold went from 446 of 2060 scripts yielding text to
+824, from 261 unreadable blocks to 21 (Crystal has 21), from 660 text boxes in a
+full interpreter run to 1630, and from 80 of 341 movement blocks decoding to 288
+of 288.
 
+Two things about that are worth carrying:
+
+- **It never refused.** Every other Gold problem announced itself by declining to
+  locate something. This one read the wrong bytes and reported a smaller number
+  in a place where a smaller number looks unremarkable. The project is well
+  defended against searches that accept nonsense and not at all against decoders
+  that quietly misread.
+- **A test with a number in it sent me the wrong way for an hour.** The movement
+  test named `$69` directly, so once the renumbering was applied it counted the
+  wrong instructions and reported 6 of 341 — which reads as evidence against the
+  renumbering. A whole competing model got built on it. What broke the tie was
+  that the competing model fixed one number and left 261 unreadable blocks where
+  the right one left 21. If a fix explains exactly one symptom, distrust it.
+
+What remains on Gold, in rough order of how much is behind each:
+
+| | why |
+|---|---|
+| music | six failures: 93 slots against the ids the scripts ask for, songs that play nothing, and one music id outside the table used by maps 38-42 and 61. Gold's music table is shaped differently or sits somewhere the locator half-finds. |
+| trainer objects | 147 of 319 agree with the class table. |
+| shopkeepers | 0 of 34 shops have one, where Crystal has 27. Likely a `special` or `pokemart` operand difference now that the numbering is right. |
+| hidden items | reading the bytes inline does no better than chance, 78 of 87 against a floor of 74. |
+| font | 4 offsets satisfy the layout. Crystal's font is the one **hardcoded** offset, so the blind search runs and correctly declines. |
+
+The rest of Gold's 23 failures are Crystal-specific assertions — the title, the
+game code, Bulbasaur's Pokédex text, "Crystal has well over a hundred item
+balls" — and are failures of the test naming a cartridge, not of the code.
 The *other* half of that claim — that a dump which would decode into nonsense
 fails loudly — is now tested rather than asserted, using the Red image as an
 adversary. It found a real bug: the sprite-palette locator was accepting Red.

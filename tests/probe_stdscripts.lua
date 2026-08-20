@@ -38,6 +38,11 @@ function probe.run(rom_path, report_path, extra)
 
   local tileset_result = tilesets.locate(rom)
   local map_result = maps.locate(rom, tileset_result.count)
+  -- Which command list this cartridge uses, before reading a single script with
+  -- it. Gold's numbering differs from Crystal's above $52, and a probe that
+  -- reads scripts with the wrong list reports plausible nonsense.
+  script_ops.select(rom, require("src.rom.script_table")
+    .collect_entries(rom, map_result, events))
 
   local entries = {}
   for _, header in ipairs(map_result.headers) do

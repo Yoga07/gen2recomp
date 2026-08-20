@@ -199,23 +199,75 @@ script_ops.table = {
   [0xA9] = { "checksave", 0 },
 }
 
--- Commands whose operand is a near pointer to a text block.
-script_ops.text_commands = {
-  [0x4C] = "writetext",
-  [0x51] = "jumptextfaceplayer",
-  [0x53] = "jumptext",
-}
+-- The one command Crystal has that Gold does not.
+--
+-- Gold's list is this one with `farjumptext` taken out, so every command above
+-- $52 is one number lower there. Three independent measurements say so, and
+-- each is sharper than the last:
+--
+--   * The project's width inference, which learns from where scripts end rather
+--     than from any specification, reads $52 as taking two operand bytes on
+--     Gold where this table says three. Two is a near pointer, three is a far
+--     one.
+--   * Walks land exactly on their script boundary 787 times under the shorter
+--     list against 463 under this one, while doing the same to Crystal drops it
+--     from 833 to 368. Crystal never uses $52 in a map script, which is why the
+--     difference went unnoticed and why the cartridge that has the command
+--     offers no evidence about its width.
+--   * Every one of Gold's 288 movement blocks decodes under the shorter list.
+--     That one took a detour: the test that counts them named $69 and $6A
+--     directly, so it was reading Crystal's applymovement out of Gold's shifted
+--     scripts and reported 6 of 341, which looks exactly like evidence against
+--     the shift. It was evidence against the test.
+--
+-- Reading Gold with this list is quiet rather than loud. The walk still lands
+-- plausibly, text simply comes out of the wrong bytes, and the import reports a
+-- smaller number without saying anything is wrong: 446 of 2060 scripts yielding
+-- text rather than 824, and 261 unreadable blocks rather than 21.
+script_ops.INSERTED = 0x52
 
--- Same, but with a bank byte first, so the text lives outside the script bank.
-script_ops.far_text_commands = {
-  [0x4B] = "farwritetext",
-  [0x52] = "farjumptext",
+--- This list with the inserted command removed and everything above it slid
+-- down by one, which is the list the older cartridges use.
+local function without_inserted(source)
+  local variant = {}
+  for opcode, entry in pairs(source) do
+    if opcode < script_ops.INSERTED then
+      variant[opcode] = entry
+    elseif opcode > script_ops.INSERTED then
+      variant[opcode - 1] = entry
+    end
+  end
+  return variant
+end
+
+-- Which commands take a pointer to a text block, by name rather than by number,
+-- so that they follow the command wherever a variant puts it. Getting this
+-- wrong is quiet: the walk still lands correctly and the text simply comes out
+-- of the wrong bytes.
+local NEAR_TEXT = {
+  writetext = true, jumptextfaceplayer = true, jumptext = true,
 }
+local FAR_TEXT = { farwritetext = true, farjumptext = true }
+
+--- Adopt a command list, deriving everything keyed by opcode from it.
+function script_ops.use(commands, variant)
+  script_ops.commands = commands
+  script_ops.variant = variant
+  script_ops.text_commands = {}
+  script_ops.far_text_commands = {}
+  for opcode, entry in pairs(commands) do
+    if NEAR_TEXT[entry[1]] then
+      script_ops.text_commands[opcode] = entry[1]
+    elseif FAR_TEXT[entry[1]] then
+      script_ops.far_text_commands[opcode] = entry[1]
+    end
+  end
+end
 
 --- Widths and terminators in the shape the walker wants.
-function script_ops.widths()
+function script_ops.widths(commands)
   local widths, terminators, names = {}, {}, {}
-  for opcode, entry in pairs(script_ops.table) do
+  for opcode, entry in pairs(commands or script_ops.commands) do
     names[opcode] = entry[1]
     widths[opcode] = entry[2]
     if entry[3] then
@@ -224,5 +276,42 @@ function script_ops.widths()
   end
   return widths, terminators, names
 end
+
+--- Decide which list this cartridge uses, and adopt it.
+--
+-- The measure is the one the widths were validated with in the first place: a
+-- wrong width desynchronises the walk, so it sails past the end of the script
+-- instead of landing on it. Whichever list lands more of the cartridge's own
+-- scripts exactly on their boundary is the list the cartridge was built with.
+--
+-- @param sorted script entry points, from script_table.collect_entries
+-- @return the variant name, and how each scored
+function script_ops.select(rom, sorted)
+  -- Required here rather than at the top because script_table is a consumer of
+  -- this module's tables, and only this function needs it.
+  local script_table = require("src.rom.script_table")
+
+  local best
+  local scores = {}
+  for _, candidate in ipairs({
+    { variant = "crystal", commands = script_ops.table },
+    { variant = "gold", commands = without_inserted(script_ops.table) },
+  }) do
+    local widths, terminators = script_ops.widths(candidate.commands)
+    local counts = script_table.score(rom, sorted,
+      { widths = widths, terminators = terminators })
+    candidate.exact = counts.exact
+    scores[candidate.variant] = counts.exact
+    if not best or counts.exact > best.exact then
+      best = candidate
+    end
+  end
+
+  script_ops.use(best.commands, best.variant)
+  return best.variant, scores
+end
+
+-- Crystal's list until a cartridge says otherwise.
+script_ops.use(script_ops.table, "crystal")
 
 return script_ops

@@ -19,29 +19,43 @@ local text = require("src.rom.text")
 local movement = require("src.rom.movement")
 
 local script_decode = {}
+-- Commands are named here rather than numbered, because the number is not the
+-- same on every cartridge: Crystal carries one script command that Gold does
+-- not, so everything above $52 is one lower there. `applymovement` is $69 on
+-- Crystal and $68 on Gold, and reading it at the wrong number does not look
+-- like an error -- the movement block simply comes out of whatever bytes
+-- happen to be at the operand.
 
-script_decode.APPLYMOVEMENT = 0x69
-script_decode.APPLYMOVEMENT_LAST = 0x6A
-
--- Where a branch target sits within each command's operands, and whether the
--- target carries its own bank byte first.
-script_decode.near_targets = {
-  [0x00] = 0, -- scall
-  [0x03] = 0, -- sjump
-  [0x06] = 1, -- ifequal
-  [0x07] = 1, -- ifnotequal
-  [0x08] = 0, -- iffalse
-  [0x09] = 0, -- iftrue
-  [0x0A] = 1, -- ifgreater
-  [0x0B] = 1, -- ifless
-  [0x8D] = 0, -- sdefer
-  [0x8F] = 0, -- stopandsjump
+-- Where a branch target sits within each command's operands.
+local NEAR_TARGETS = {
+  scall = 0, sjump = 0, iffalse = 0, iftrue = 0,
+  ifequal = 1, ifnotequal = 1, ifgreater = 1, ifless = 1,
+  sdefer = 0, stopandsjump = 0,
 }
 
-script_decode.far_targets = {
-  [0x01] = 0, -- farscall
-  [0x04] = 0, -- farsjump
-}
+-- Same, but the target carries its own bank byte first.
+local FAR_TARGETS = { farscall = 0, farsjump = 0 }
+
+--- The opcode-keyed forms of the above, for whichever command list is in use.
+-- @param names opcode -> command name, from script_ops.widths
+-- @return applymovement opcode, applymovementlasttalked opcode, near, far
+function script_decode.targets_for(names)
+  local near, far, movement, movement_last = {}, {}
+  for opcode, name in pairs(names) do
+    if NEAR_TARGETS[name] ~= nil then
+      near[opcode] = NEAR_TARGETS[name]
+    end
+    if FAR_TARGETS[name] ~= nil then
+      far[opcode] = FAR_TARGETS[name]
+    end
+    if name == "applymovement" then
+      movement = opcode
+    elseif name == "applymovementlasttalked" then
+      movement_last = opcode
+    end
+  end
+  return movement, movement_last, near, far
+end
 
 -- A script that runs this long is not a script.
 script_decode.MAX_INSTRUCTIONS = 4000
@@ -53,6 +67,8 @@ script_decode.MAX_INSTRUCTIONS = 4000
 --   code[bank][addr] = { op, opcode, size, args = {bytes}, text = pages }
 function script_decode.reachable(rom, entries)
   local widths, terminators, names = script_ops.widths()
+  local applymovement, applymovement_last, near_targets, far_targets =
+    script_decode.targets_for(names)
 
   local code = {}
   local stats = { instructions = 0, blocks = 0, failed = 0, reasons = {} }
@@ -159,9 +175,9 @@ function script_decode.reachable(rom, entries)
       -- Movement blocks are resolved here for the same reason text is: the
       -- engine reads the cache and cannot go back to the cartridge.
       local move_addr
-      if opcode == script_decode.APPLYMOVEMENT then
+      if opcode == applymovement then
         move_addr = rom:u16le(at + 2)
-      elseif opcode == script_decode.APPLYMOVEMENT_LAST then
+      elseif opcode == applymovement_last then
         move_addr = rom:u16le(at + 1)
       end
       if move_addr and move_addr >= 0x4000 and move_addr <= 0x7FFF then
@@ -173,7 +189,7 @@ function script_decode.reachable(rom, entries)
 
       -- Branch targets, recorded as addresses so the interpreter can jump
       -- without knowing how the operands were laid out.
-      local near_at = script_decode.near_targets[opcode]
+      local near_at = near_targets[opcode]
       if near_at then
         local target = rom:u16le(at + 1 + near_at)
         if target >= 0x4000 and target <= 0x7FFF then
@@ -183,7 +199,7 @@ function script_decode.reachable(rom, entries)
         end
       end
 
-      local far_at = script_decode.far_targets[opcode]
+      local far_at = far_targets[opcode]
       if far_at then
         local target_bank = rom:u8(at + 1 + far_at)
         local target = rom:u16le(at + 2 + far_at)
