@@ -200,6 +200,17 @@ function sequencer:strike(channel, pitch, frames)
     return
   end
 
+  -- A cry carries a pitch adjustment, added to the frequency register the way
+  -- the cartridge's own pitch_offset command adds to it. This is what makes 251
+  -- species out of 68 sounds.
+  if self.pitch_offset and self.pitch_offset ~= 0 then
+    value = value + self.pitch_offset
+    if value < 0 or value > 2047 then
+      self.out_of_range = self.out_of_range + 1
+      return
+    end
+  end
+
   if channel.number == 3 then
     self.apu:write(registers.power, 0x80)
     self.apu:write(registers.level, 0x20)
@@ -222,6 +233,10 @@ function sequencer:duration_for(channel, length)
   local units = (length + 1) * channel.speed * self.tempo + channel.fraction
   local frames = math.floor(units / 256)
   channel.fraction = units - frames * 256
+  -- A cry stretches or squashes every note in it by one factor.
+  if self.length_scale then
+    frames = math.floor(frames * self.length_scale)
+  end
   return math.max(1, frames)
 end
 

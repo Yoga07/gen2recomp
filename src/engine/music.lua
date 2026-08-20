@@ -43,6 +43,7 @@ function music.load(game_id)
     return nil, "no music banks in the cache; re-import"
   end
   local effects = cache.read(game_id, "sfx") or {}
+  local cry_data = cache.read(game_id, "cries")
 
   -- Hex back to bytes, once, at load.
   local banks = {}
@@ -55,6 +56,7 @@ function music.load(game_id)
   local instance = setmetatable({
     songs = songs,
     effects = effects,
+    cries = cry_data,
     banks = banks,
     apu = apu_module.new(music.RATE),
     playing = nil,
@@ -119,6 +121,45 @@ function music:play(index)
   return true
 end
 
+--- Play a species' cry.
+--
+-- A cry is a base sound plus two numbers: 251 species share 68 sounds, and what
+-- separates a Venusaur from a Bulbasaur is that the pitch is lower and the
+-- length longer. Both are applied here rather than being carried as data the
+-- sequencer ignores.
+--
+-- The pitch is added to the frequency register, which is what the cartridge's
+-- own `pitch_offset` command does, so the meaning is not invented. **How the
+-- length scales is inferred**: it clusters around 256 and runs from 56 to 576,
+-- so it is treated as a multiplier against 256. That is a reading rather than a
+-- finding, and it is the part to distrust if a cry sounds the wrong duration.
+-- @return true when the species has a cry
+function music:play_cry(species)
+  local record = self.cries and self.cries.species
+    and self.cries.species[species]
+  if not record then
+    return false
+  end
+  local entry = self.cries.block[record.cry + 1]
+  if not entry then
+    return false
+  end
+
+  local channels = {}
+  for slot, channel in ipairs(entry.channels or {}) do
+    channels[slot] = entry.bank * 0x4000 + (channel.addr - 0x4000)
+  end
+  if #channels == 0 then
+    return false
+  end
+
+  self.effect:play(channels, entry.bank, entry.channel)
+  self.effect.pitch_offset = record.pitch
+  self.effect.length_scale = record.length / 256
+  self.effect_playing = true
+  return true
+end
+
 --- Play a sound effect over whatever is already playing.
 -- @return true when the effect exists and started
 function music:play_sound(id)
@@ -137,6 +178,10 @@ function music:play_sound(id)
 
   -- Not an APU reset: the music is still going and resetting would cut it off.
   self.effect:play(channels, entry.bank, entry.channel)
+  -- A plain effect carries no pitch or length adjustment; clear whatever a
+  -- previous cry left behind or every explosion inherits a Pikachu.
+  self.effect.pitch_offset = nil
+  self.effect.length_scale = nil
   self.effect_playing = true
   return true
 end

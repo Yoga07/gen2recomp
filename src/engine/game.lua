@@ -2031,6 +2031,13 @@ function game:script_play_sound(sound)
   end
 end
 
+--- A script making a Pokémon shout.
+function game:script_cry(species)
+  if self.music then
+    self.music:play_cry(species)
+  end
+end
+
 function game:script_money()
   return self.money
 end

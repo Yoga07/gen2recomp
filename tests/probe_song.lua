@@ -19,6 +19,7 @@ local Rom = require("src.rom.rom")
 local music = require("src.rom.music")
 local apu_module = require("src.audio.apu")
 local sequencer = require("src.audio.sequencer")
+local locate = require("src.rom.locate")
 
 local probe = {}
 
@@ -212,6 +213,42 @@ function probe.run(rom_path, report_path, which)
     end
   end
 
+
+  -- Cries, which are the thing pitch and length exist for: 251 species out of
+  -- 68 sounds, separated only by those two numbers. An evolution family is the
+  -- demonstration — same sound, lower and longer each time.
+  log("\n== cries ==")
+  do
+    local music_engine = require("src.engine.music")
+    local cache = require("src.import.cache")
+    local game_id
+    for _, entry in ipairs(cache.list_games()) do
+      if entry.current and entry.game == "crystal" then
+        game_id = entry.game
+      end
+    end
+    local player = game_id and music_engine.load(game_id)
+    if not player or not player.cries then
+      log("  SKIP  no cries in the cache")
+    else
+      local names = {}
+      local n = locate.table(locate.descriptors.species_names, rom)
+      names = n and n.records or {}
+      local out = {}
+      local wanted = { 1, 2, 3, 4, 6, 25, 129, 130, 143, 150 }
+      for _, species in ipairs(wanted) do
+        player:play_cry(species)
+        local record = player.cries.species[species]
+        log("  %3d %-11s cry %2d  pitch %6d  length %4d", species,
+          names[species] or "?", record.cry, record.pitch, record.length)
+        for _, sample in ipairs(player:render(math.floor(probe.RATE * 1.1))) do
+          out[#out + 1] = sample
+        end
+      end
+      love.filesystem.write("dump/audio/cries.wav", wav(out, probe.RATE))
+      log("  -> dump/audio/cries.wav")
+    end
+  end
   -- How much of the width table has an ear actually had a chance to check?
   --
   -- Widths are bounded from above by the byte layout and from below only by

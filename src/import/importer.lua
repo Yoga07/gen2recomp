@@ -27,6 +27,7 @@ local machines = require("src.rom.machines")
 local obstacles = require("src.rom.obstacles")
 local whirlpool = require("src.rom.whirlpool")
 local sfx = require("src.rom.sfx")
+local cries = require("src.rom.cries")
 local learnsets = require("src.rom.learnsets")
 local dex = require("src.rom.dex")
 local cures = require("src.rom.cures")
@@ -436,6 +437,31 @@ function importer.run(path, progress)
         end
       end
       cache.write(descriptor.game, "music_banks", encoded)
+
+      -- The cries: a block of base sounds between the two tables, and a
+      -- per-species table naming one of them with a pitch and a length.
+      local cry_result, cry_err = cries.locate(rom, music_result, sfx_result)
+      if not cry_result then
+        failed.cries = cry_err
+      else
+        offsets.cries = cry_result.offset
+        music_summary.cries = cry_result.block.count
+        cache.write(descriptor.game, "cries", {
+          block = cry_result.block.entries,
+          species = cry_result.records,
+        })
+        for _, entry in ipairs(cry_result.block.entries) do
+          if not encoded[tostring(entry.bank)] then
+            local raw = rom:read(entry.bank * 0x4000, 0x4000)
+            local hex = {}
+            for at = 1, #raw do
+              hex[at] = ("%02X"):format(raw:byte(at))
+            end
+            encoded[tostring(entry.bank)] = table.concat(hex)
+          end
+        end
+        cache.write(descriptor.game, "music_banks", encoded)
+      end
     end
   end
 

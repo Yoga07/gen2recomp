@@ -564,6 +564,16 @@ function VM:step()
     return
   end
 
+  if op == "cry" and self.host and self.host.script_cry then
+    local species = instruction.args and instruction.args[1]
+    if species then
+      self.host:script_cry(species)
+    end
+    self.performed = (self.performed or 0) + 1
+    self:advance()
+    return
+  end
+
   if op == "playsound" and self.host and self.host.script_play_sound then
     local sound = instruction.args and instruction.args[1]
     if sound then

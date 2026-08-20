@@ -76,7 +76,8 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** music while you play | working — each map plays its own tune |
 | Sound effect table | working — 207 slots, found behind the songs |
 | **Engine:** sound effects | working — scripts play them over the music |
-| Cries | not located — `cry` indexes something else; see docs |
+| Cries | working — 68 base cries, 251 species records |
+| **Engine:** cries | working — scripts make Pokémon shout |
 | Reading real .sav files | working — read from a real Crystal save |
 | **Engine:** map edge connections | working — 142 crossings |
 | **Engine:** trainer battles | working — 518 trainers across 57 classes |
@@ -107,9 +108,9 @@ Drop a cartridge `.sav` onto the window while playing and its party comes
 across. Nothing about the save's layout is hardcoded: the party is found by
 checking that every member's stats come back out of the stat formula.
 
-738 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+746 tests pass against Crystal (USA/Europe) rev 1, SHA-1
 `f2f52230b536214ef7c9924f483392993e226cfb`, and a further 18 run when a second,
-deliberately wrong cartridge is supplied — 756 in all. Nothing is claimed to be
+deliberately wrong cartridge is supplied — 764 in all. Nothing is claimed to be
 correct until it round-trips against content known independently of this code.
 
 Offsets discovered in that cartridge, for reference — the importer finds these
@@ -135,6 +136,8 @@ itself and does not depend on them:
 | Status cures | `0x00F071` | `$03` |
 | Music table | `0x0E906E` | `$3A` |
 | Sound effect table | `0x0E927C` | `$3A` |
+| Base cries | `0x0E91B0` | `$3A` |
+| Species cries | `0x0F2787` | `$3C` |
 
 ## Requirements
 

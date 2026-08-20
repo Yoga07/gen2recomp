@@ -2703,6 +2703,30 @@ local function test_sequencer(rom)
 end
 
 -- Music in the game, played from the cache rather than from a cartridge.
+
+--- Which cached import belongs to the cartridge under test.
+--
+-- Not "whichever one is current": once a second cartridge has been imported
+-- there are two, and reading one game's cache while testing another's ROM
+-- produces failures that look like data bugs and are not.
+local function cached_game_for(rom)
+  local cache_module = require("src.import.cache")
+  local versions_module = require("src.rom.versions")
+  local header_module = require("src.rom.header")
+  local sha = love.data.hash("sha1", rom.data):gsub(".", function(c)
+    return ("%02x"):format(c:byte())
+  end)
+  local descriptor = versions_module.identify(header_module.parse(rom), sha)
+  if not descriptor then
+    return nil
+  end
+  for _, entry in ipairs(cache_module.list_games()) do
+    if entry.current and entry.game == descriptor.game then
+      return entry.game
+    end
+  end
+  return nil
+end
 local function test_game_music(rom)
   log("\n== music in the game ==")
 
@@ -2712,12 +2736,11 @@ local function test_game_music(rom)
   local sequencer = require("src.audio.sequencer")
   local music_rom = require("src.rom.music")
 
-  local game_id
-  for _, entry in ipairs(cache_module.list_games()) do
-    if entry.current then
-      game_id = entry.game
-    end
-  end
+  -- The cache that belongs to *this* cartridge. Taking whichever import
+  -- happened to be current picked Gold while the tests were reading Crystal
+  -- once a second game had been imported, and the mismatch showed up as a map
+  -- naming a song that did not exist.
+  local game_id = cached_game_for(rom)
   if not game_id then
     log("  SKIP  no current import in the cache")
     return
@@ -2910,6 +2933,100 @@ local function test_game_music(rom)
     end
     check("the engine plays a sound effect", player:play_sound(id))
     check_equal("and the music is still playing underneath", player.playing, 12)
+  end
+
+  -- Cries. The locator accepts on structure alone — 251 records naming every
+  -- one of the base cries and none outside them — so the evolution agreement
+  -- below is independent evidence rather than the thing that chose the table.
+  local cries_rom = require("src.rom.cries")
+  local music_rom2 = require("src.rom.music")
+  local songs_for_cries = music_rom2.locate(rom)
+  local effects_for_cries = sfx_rom and sfx_rom.locate(rom)
+  local cry_result = songs_for_cries and effects_for_cries
+    and cries_rom.locate(rom, songs_for_cries, effects_for_cries)
+
+  if check("the cry table was located", cry_result ~= nil) then
+    log("        %d base cries, %d species records at 0x%06X",
+      cry_result.block.count, #cry_result.records, cry_result.offset)
+    check_equal("one record per species", #cry_result.records, 251)
+
+    -- Every base cry used and none invented. The block was measured between
+    -- two unrelated tables without reference to this one, so the two agreeing
+    -- is two searches converging.
+    local used, outside = {}, 0
+    for _, record in ipairs(cry_result.records) do
+      if record.cry >= cry_result.block.count then
+        outside = outside + 1
+      end
+      used[record.cry] = true
+    end
+    local distinct = 0
+    for _ in pairs(used) do distinct = distinct + 1 end
+    check_equal("no species names a cry outside the block", outside, 0)
+    check_equal("and every base cry is used by somebody", distinct,
+      cry_result.block.count)
+
+    -- A cry's channels rise but are not consecutive — the first skips the wave
+    -- channel — which is the condition that hid this table for so long.
+    local gapped = 0
+    for _, entry in ipairs(cry_result.block.entries) do
+      local previous
+      for _, channel in ipairs(entry.channels or {}) do
+        if previous and channel.channel > previous + 1 then
+          gapped = gapped + 1
+        end
+        previous = channel.channel
+      end
+    end
+    check("some cries skip a channel rather than using a run of them",
+      gapped > 0, ("%d"):format(gapped))
+
+    -- The independent check: evolution families share a base cry, measured
+    -- against the floor this table's own distribution sets rather than against
+    -- zero. A region that is mostly one value scores 90% and means nothing.
+    local learn = cache_module.read(game_id, "learnsets") or {}
+    local families = 0
+    local agree = 0
+    for species, record in ipairs(learn) do
+      for _, evolution in ipairs(record.evolutions or {}) do
+        local into = evolution.into
+        if into and cry_result.records[species] and cry_result.records[into] then
+          families = families + 1
+          if cry_result.records[species].cry == cry_result.records[into].cry then
+            agree = agree + 1
+          end
+        end
+      end
+    end
+    local counts = {}
+    for _, record in ipairs(cry_result.records) do
+      counts[record.cry] = (counts[record.cry] or 0) + 1
+    end
+    local floor = 0
+    for _, times in pairs(counts) do
+      floor = floor + (times / 251) ^ 2
+    end
+    log("        %d of %d evolution pairs share a cry (%d%%), against a " ..
+      "floor of %d%%", agree, families,
+      math.floor(agree / math.max(families, 1) * 100), math.floor(floor * 100))
+    check("evolution families share a cry far more often than chance",
+      agree / math.max(families, 1) > floor * 5,
+      ("%d%% against %d%%"):format(math.floor(agree / math.max(families, 1) * 100),
+        math.floor(floor * 100)))
+
+    -- Pitch is signed. Reading it unsigned sends the species that carry a
+    -- negative one several octaves the wrong way.
+    local negative = 0
+    for _, record in ipairs(cry_result.records) do
+      if record.pitch < 0 then
+        negative = negative + 1
+      end
+    end
+    log("        %d species carry a negative pitch", negative)
+    check("some pitches are negative, so the field is signed", negative > 0)
+
+    -- And the engine plays one.
+    check("the engine plays a cry", player:play_cry(1))
   end
 
   -- And it actually makes a sound.
@@ -3329,12 +3446,11 @@ local function test_whirlpool(rom, tileset_result, map_result)
   -- And in the engine's hands: water you cannot cross until somebody can.
   local cache_module = require("src.import.cache")
   local world = require("src.engine.world")
-  local game_id
-  for _, entry in ipairs(cache_module.list_games()) do
-    if entry.current then
-      game_id = entry.game
-    end
-  end
+  -- The cache that belongs to *this* cartridge. Taking whichever import
+  -- happened to be current picked Gold while the tests were reading Crystal
+  -- once a second game had been imported, and the mismatch showed up as a map
+  -- naming a song that did not exist.
+  local game_id = cached_game_for(rom)
   if not game_id then
     log("  SKIP  no import in the cache for the engine half")
     return

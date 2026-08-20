@@ -1,7 +1,7 @@
 # Handover
 
-Written at commit `6db0197` and updated since, 60 commits in, 738 tests passing
-against Crystal and none failing — 756 with a second, deliberately wrong
+Written at commit `6db0197` and updated since, 64 commits in, 746 tests passing
+against Crystal and none failing — 764 with a second, deliberately wrong
 cartridge supplied. This is what a new session needs to pick the work up.
 
 `README.md` says what the project is and what state each area is in.
@@ -56,7 +56,7 @@ love . --shot <png> <mode>
 love . --probe-<name> <rom> <report> [extra]
 ```
 
-There are 42 probes. They are diagnostics kept from each investigation, not
+There are 45 probes. They are diagnostics kept from each investigation, not
 tests — `--probe-vm`, `--probe-channels`, `--probe-terrain` and `--probe-time`
 are the ones most likely to be useful again. `--shot <mode>` renders one frame
 of the running game and exits; the modes are listed in `main.lua` and cover
@@ -146,21 +146,22 @@ code path.
 The extraction is close to complete: species, moves, stats, learnsets,
 evolutions, sprites, palettes, tilesets, 388 maps, events, text, font,
 encounters, 541 trainers, 255 items, 34 marts, 178 item balls, 85 hidden items,
-57 machines, 100 songs, 207 sound effect slots, 251 Pokédex entries, 14 status
+57 machines, 100 songs, 207 sound effects, 68 cries, 251 Pokédex entries, 14 status
 cures, and 14558 decoded script instructions.
 
 The engine plays: overworld, warps, connections, wild and trainer battles,
 catching, experience and levelling, evolution, fainting and blackout, switching,
 the bag in and out of battle, shops, the script interpreter with yes/no prompts,
 Surf, Cut, Strength, Whirlpool, storage boxes, the clock, the Pokédex, status
-cures, music on every map with sound effects over it, and reading a real `.sav`.
+cures, music on every map with sound effects and cries over it, and reading a
+real `.sav`.
 
 ### What is left, and what is in the way
 
 | | state |
 |---|---|
 | Badges | tracked and gated, but nothing awards them |
-| Cries | `cry` indexes something that is not a table of headers |
+
 | `special` routines | 127 of them, assembly, not runnable from bytecode |
 | Unown's 26 forms | pic table locator does not find them |
 
@@ -228,24 +229,49 @@ problems and only one of them is the wall:
    offset in the cartridge against the ids the scripts ask for: exactly one
    explains all 32, and running the same scan on `playmusic`, whose answer was
    already known, puts the song table top and so validates the method.
-7. **Cries.** Not done, and the same scan says why: **no** offset explains the
-   47 ids `cry` asks for, the best being a four-way tie at 36, which is noise
-   rather than a near miss. A cry takes a species number and Gen 2 gives each
-   species a base cry plus a pitch and a length, so it indexes something of that
-   shape rather than a table of headers. Between the song table and the effect
-   table sit 38 pointers into bank `$3C` whose addresses climb by exactly 9 —
-   a uniform block of small three-channel sounds, which is what the base cries
-   would look like. **That is a resemblance, not a finding.** What is missing is
-   the per-species table pointing into it.
+7. **Cries.** Done. Two structures: a block of **68 base cries** between the
+   song and effect tables, and a **251-record table** (six bytes: base cry,
+   pitch, length) at `0x0F2787` in Crystal and `0x0F2747` in Gold. Sixty-eight
+   sounds make 251 voices — pitch falls and length grows as a family evolves.
+   Pitch is **signed**; 28 species carry a negative one. Two traps, both worth
+   knowing because they will recur: a header's channels **rise but need not be
+   consecutive** (the first cry skips the wave channel, opening on 4, 5, 7), and
+   the 13 bytes between the tables push a three-byte grid walk permanently out
+   of phase with the cry block. The pitch is applied as a frequency offset,
+   which is what the cartridge's own `pitch_offset` does; **how the length
+   scales is inferred** as a multiplier against 256, and is the part to
+   distrust.
 
-### The one unverified claim
+### The claim, tested at last
 
-`README.md` says all three games work from one code path. That is the design and
-nothing hardcodes Crystal — but **it has only ever run against Crystal**. One
-import against a Gold or Silver ROM would confirm it or find real bugs. This is
-the highest-value thing a new session could do cheaply, and it needs a ROM from
-the user: there is no Gold or Silver image on this machine, only Crystal and a
-Gen 1 Red.
+`README.md` says all three games work from one code path. A **Pokémon Gold**
+cartridge is now on this machine, at the repository root (gitignored — `*.gbc`
+is, and must stay, excluded), and it has been imported.
+
+**It largely holds.** Every signature table located at a completely different
+offset from Crystal's, which is the whole point of searching rather than
+hardcoding: base stats, species and move names, items, moves, 28 tilesets, 368
+maps, 1241 warps, encounters, learnsets, trainers, marts, the machine list, the
+status cures, the Pokédex entries, the music table, the sound effects, the
+cries. Whirlpool comes out as collision `$24` on both.
+
+Four things fail on Gold, and each is honest about it rather than wrong:
+
+| | why |
+|---|---|
+| font | 4 offsets satisfy the layout; refuses to guess. Crystal's font is the one **hardcoded** offset and it does not apply here, so the blind search runs and correctly declines. |
+| std_scripts | longest run of pointers is 6. The table is elsewhere or shaped differently in Gold. |
+| obstacles | needs the standard scripts, so it is blocked by the row above rather than broken. |
+| sprites | no offset validated as a pic pointer table — the bank bias that Crystal uses is `$36` and Gold's differs. |
+
+Two more numbers are lower and worth a look rather than a shrug: **446 of 2060**
+scripts read as text against Crystal's 893 of 2200, and **258** blocks
+unreadable against Crystal's 21. Some of that is the missing standard-script
+table; whether all of it is has not been checked.
+
+So the next Gold job, in order: the pic table's bank bias, then the
+standard-script table, which unblocks obstacles and probably much of the script
+shortfall.
 
 The *other* half of that claim — that a dump which would decode into nonsense
 fails loudly — is now tested rather than asserted, using the Red image as an

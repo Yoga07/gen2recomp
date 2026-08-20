@@ -1830,7 +1830,7 @@ species id and needs cry data that has not been found either. Pointing either at
 the song table would play an arbitrary tune every time somebody opened a door,
 which is worse than silence and much harder to notice as a bug.
 
-### Two more tables, located but not understood
+### The cries, and a validator that was wrong twice
 
 `playsound` and `cry` are still ignored, and the reason had been "the tables
 that index them are not located". Looking properly moved that on, though not all
@@ -1914,6 +1914,93 @@ and does not stop. Anything between works.
 
 So: a validator whose one over-tight condition had been hiding an entire table,
 found by asking why the search could not see what had to be there.
+
+
+### The cries, and the same over-tight condition again
+
+`cry` takes a species number, and no offset in the cartridge explains the ids it
+asks for. That is because a cry is not one lookup but two: a block of **68 base
+cries**, and a 251-entry table naming one of them with a pitch and a length.
+Sixty-eight sounds make 251 voices.
+
+The block sits between the song table and the effect table, and it was invisible
+for the same reason the effect table was — a condition that is true of music and
+of nothing else. The first time it was the *opening* channel. This time it was
+subtler: `header_at` requires a header's channels to be **consecutive**. The
+first cry in Crystal reads
+
+```
+84 77 78 | 05 86 78 | 07 95 78
+```
+
+which is three channels opening on 4, then 5, then **7**. It skips the wave
+channel. Nothing says a sound must use an unbroken run of channels, and
+requiring it rejected every cry in the game.
+
+A duller trap sits in the same place. What lies between the two tables is 13
+bytes — an inline header and a terminator — and 13 is not a multiple of three,
+so a walk stepping three bytes at a time from the song table's end steps
+straight over the start of the cry block and never lands on it. The scan starts
+from every offset instead.
+
+#### The measure that was swamped, and the one that worked
+
+Scoring candidates by "do evolution families share a cry" looked obvious and was
+useless as stated. The first answer it gave was a region of mostly zeros scoring
+**95%** — because when a table is nearly all one value, any two species agree.
+Chance for that region was 85%. It is the hidden-item trap exactly: a number
+that looks like strong evidence and is precisely what chance produces.
+
+The fix is to score the **excess over each candidate's own floor** — the chance
+that two species drawn from that candidate's own distribution match, which is
+the sum of its squared frequencies. Against that, the answer separates cleanly:
+
+| stride | best | agreement | its own floor | excess |
+|---|---|---|---|---|
+| 3 | `0x0AF4DE` | 57% | 17% | +39 |
+| 4 | `0x01EE14` | 55% | 12% | +42 |
+| **6** | **`0x0F2787`** | **59%** | **1%** | **+57** |
+| 8 | `0x0AFF28` | 34% | 7% | +26 |
+
+The winner has both the highest agreement and much the flattest distribution,
+which is what a real per-species table looks like.
+
+#### What accepts it
+
+Not the evolutions — those stay independent evidence. The locator accepts on
+structure: 251 records of six bytes whose first word is a base cry, using
+**every one of the 68 and none outside them**. The block was measured between
+two unrelated tables with no reference to this one, so the two agreeing is two
+searches converging rather than one confirming itself.
+
+One wrinkle needed the treatment the standard-script table needed. Five offsets
+pass, and they are the answer plus the next four multiples of six: sliding the
+window a whole record drops species 1, picks up whatever follows, and the
+remaining 250 still name all 68. That is one table counted five times, not five
+candidates, so the accepted offsets are grouped into runs a record apart and the
+start of the run is the table. Two separate runs would be real ambiguity and are
+still refused.
+
+The records read themselves once found:
+
+```
+BULBASAUR   cry 15  pitch 128  length 129
+IVYSAUR     cry 15  pitch  32  length 256
+VENUSAUR    cry 15  pitch   0  length 320
+```
+
+Pitch falls and length grows as a family evolves, which is what makes a Venusaur
+sound like a bigger Bulbasaur. Pitch is **signed** — 28 species carry a negative
+one, and reading the field unsigned would send them several octaves the wrong
+way.
+
+Both cartridges agree: Crystal at `0x0F2787`, Gold at `0x0F2747`, identical
+values at different offsets.
+
+**What is inferred rather than found**: how the length scales. It clusters
+around 256 and runs from 56 to 576, so it is applied as a multiplier against
+256. The pitch is not inferred — it is added to the frequency register, which is
+what the cartridge's own `pitch_offset` command does.
 
 ### The mixer was most of the cost
 
