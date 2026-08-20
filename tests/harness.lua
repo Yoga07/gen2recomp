@@ -4901,15 +4901,23 @@ local function test_script_vm(rom, map_result)
     -- agreement between two independently found things is the evidence.
     check("the table has a few dozen entries", std_result.count >= 40
       and std_result.count <= 80, ("%d"):format(std_result.count))
-    -- Not all of them, and deliberately so. The routine test wants at least
-    -- three instructions and something recognisable among them, which is the
-    -- strictness that killed two false tables -- one whose 104 entries all
+    -- What fraction reads as a *routine* is not a portable claim. script_at
+    -- wants three instructions and something recognisable among them, which is
+    -- the strictness that killed two false tables -- one whose 104 entries all
     -- pointed at the same terminator byte, and one whose targets marched in a
-    -- constant nine-byte step. Being that strict necessarily rejects the
-    -- genuinely short routines too.
-    check("most entries are real routines",
-      std_result.real >= std_result.count * 0.65,
-      ("%d of %d"):format(std_result.real, std_result.count))
+    -- constant nine-byte step. It also rejects genuinely short routines, and
+    -- Gold's standard scripts are mostly short: 13 of its 46 clear it where 37
+    -- of Crystal's 52 do. Asserting a fraction here once cost the Gold import
+    -- its table.
+    --
+    -- So the assertion is the weak reading, which does travel: nearly every
+    -- entry must decode as script bytecode that reaches a terminator. Crystal
+    -- manages 52 of 52 and Gold 41 of 46.
+    check("nearly every entry decodes as script bytecode",
+      std_result.decoded >= std_result.count * 0.8,
+      ("%d of %d"):format(std_result.decoded, std_result.count))
+    log("        %d of them are routines by the strict reading",
+      std_result.real)
 
     for _, entry in ipairs(std_result.entries) do
       entries[#entries + 1] = { bank = entry.bank, addr = entry.addr }

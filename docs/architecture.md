@@ -1093,6 +1093,50 @@ Wiring them in took the interpreter from 1396 text boxes across a full run to
 **2833**, and `jumpstd` no longer appears among the reasons scripts stop — the
 only two left are the misparsed operands, 3084 and 3853.
 
+### The threshold that hid Gold's table
+
+Importing Gold reported "the longest run of standard-script pointers was 6",
+which sounds like the table is not there or has a different shape. It is there,
+at `0x100000`, with 46 entries all naming bank `$40` — and the search had
+already found it and thrown it away.
+
+The rule that discarded it was "at least half the entries must read as real
+routines". `script_at` is deliberately strict, wanting three instructions and a
+recognisable command among them, because that strictness is what killed two
+false tables. But how many entries clear it is a fact about the cartridge, not
+about the table: Gold's standard scripts are far shorter than Crystal's — a
+dozen of them are a single `farjumptext` — so 13 of 46 clear it where 37 of
+Crystal's 52 do. A threshold fitted to one cartridge rejected the other's real
+table while reporting a number, 6, that pointed nowhere near the actual problem.
+
+The fix was to stop treating it as a threshold. What is sharp about the table is
+structural and holds on both cartridges: **it begins at the very start of the
+bank that all of its entries name.** Crystal's sits at `0x0BC000` with every
+entry in `$2F`; Gold's at `0x100000` with every entry in `$40`. Measured across
+both cartridges, exactly one run of 40-or-more same-bank pointers satisfies that
+in each, and it is the right one both times. The strict count then only has to
+beat every run that does not overlap the winner — 13 against 5 on Gold, 37
+against 18 on Crystal, where in both cases the runner-up is the sound-effect
+table. No fraction has to be invented.
+
+Read out rather than counted, Gold's table is obviously what it claims to be:
+entry 7 is "It's the TOWN MAP.", entry 9 "It's a TV.", entry 23 the
+Bug-Catching Contest judging, entries 25 to 38 the phone-number registration
+routines Gen 2 added, and entry 40 the gym-leader signpost. `--probe-stdscripts
+<rom> <report> <offset>` prints that listing, with the first line of text each
+routine shows.
+
+Locating it also unblocked the obstacle detector, which tells a cut tree from a
+boulder by which standard script the object runs. On Gold that now finds sprite
+89 as the tree and sprite 90 as the boulder, two different sprites running two
+different routines, from the same code that finds Crystal's.
+
+The harness assertion moved with the locator. It used to require a fraction of
+entries to be routines, which is the same unportable claim; it now requires
+nearly every entry to decode as script bytecode reaching a terminator, which is
+52 of 52 on Crystal and 41 of 46 on Gold, and reports the strict count as
+information rather than asserting on it.
+
 ## The machine list, and why badges are not earnable yet
 
 The items are named TM01 to TM50 and HM01 to HM07, which says nothing about

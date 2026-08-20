@@ -50,7 +50,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** save and load | working |
 | Map scripts | interpreted — 1743 of 1771 run to an end |
 | **Engine:** battles started by scripts | working — wild and trainer |
-| Standard scripts | working — 52, reached by jumpstd |
+| Standard scripts | working — 52 in Crystal, 46 in Gold, found by anchoring |
 | **Engine:** yes-or-no prompts | working — 139 questions |
 | Movement blocks | working — 353 walks decoded |
 | **Engine:** NPCs turn, walk and vanish | working |
@@ -208,10 +208,19 @@ stored-bank-to-real-bank mapping rather than for one number, refusing when two
 banks fit equally well. Crystal's answer comes back as the uniform `+$36` it
 always was.
 
-Three things still fail on Gold, and each says so rather than guessing: the
-font, whose Crystal offset is the one hardcoded value in the project, so the
-blind search runs and declines between four candidates; the standard-script
-table; and the obstacle detector that depends on it. See the handover.
+The standard-script table broke a second one. It is there in Gold, 46 entries at
+`0x100000`, and the search had already found it and thrown it away: the rule
+said half the entries must read as real routines, and Gold's standard scripts
+are short enough that only 13 of 46 do, against 37 of Crystal's 52. That number
+is a fact about the cartridge, not about the table. The table is now found by
+what is true of it on both — it begins at the very start of the bank all its
+entries name — and the strict count only has to beat the best run that is not
+the table, which it does by 13 to 5 and 37 to 18. That also unblocked the
+obstacle detector, so Gold's cut trees and boulders are found too.
+
+One thing still fails on Gold, and it says so rather than guessing: the font,
+whose Crystal offset is the one hardcoded value in the project, so the blind
+search runs and declines between four candidates. See the handover.
 
 Discovered offsets are recorded in each cache's `manifest.lua`.
 

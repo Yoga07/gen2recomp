@@ -25,7 +25,7 @@ end
 
 local JUMPSTD, CALLSTD = 0x0C, 0x0D
 
-function probe.run(rom_path, report_path)
+function probe.run(rom_path, report_path, extra)
   report = {}
 
   local rom, err = Rom.load(rom_path)
@@ -268,13 +268,15 @@ function probe.run(rom_path, report_path)
   -- The one run that survived the tightening, read out in full so its entries
   -- can be judged rather than counted.
   local _, _, names = script_ops.widths()
-  local TABLE = 0x0BC042
+  -- Which run to read out in full. Crystal's table by default; pass another
+  -- offset to read a candidate found on a different cartridge.
+  local TABLE = tonumber(extra) or 0x0BC042
 
   -- The run-finder reports where a valid run begins, which is not necessarily
   -- where the table begins: an entry the validator is too strict for would cut
   -- the front off. Walking backwards from the run shows the real start.
   log("\nwalking back from 0x%06X:", TABLE)
-  for index = -50, 2 do
+  for index = math.max(-50, -math.floor(TABLE / 3)), 2 do
     local at_table = TABLE + index * 3
     local bank, addr = rom:u8(at_table), rom:u16le(at_table + 1)
     local plausible = addr >= 0x4000 and addr <= 0x7FFF
@@ -291,7 +293,7 @@ function probe.run(rom_path, report_path)
     local out = {}
     local readable = true
     for _ = 1, 10 do
-      if at + 1 > rom.size then break end
+      if at < 0 or at + 1 > rom.size then break end
       local opcode = rom:u8(at)
       local width = widths[opcode]
       if width == nil then
@@ -303,8 +305,12 @@ function probe.run(rom_path, report_path)
       at = at + 1 + width
       if terminators[opcode] then break end
     end
-    log("  %2d $%02X:$%04X %-9s %s", index, bank, addr,
-      readable and "" or "STOPS", table.concat(out, "; "))
+    -- What the routine says, not just what it is made of. A table of common
+    -- routines should read like one: the landmark signpost, the fanfare, the
+    -- shopkeeper. This is the check that counting instructions cannot make.
+    log("  %2d $%02X:$%04X %-9s %-46s %s", index, bank, addr,
+      readable and "" or "STOPS",
+      table.concat(out, "; "):sub(1, 46), first_text(bank, addr))
   end
 
   rom:release()
