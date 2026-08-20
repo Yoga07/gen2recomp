@@ -1749,18 +1749,20 @@ exact about how far it reaches:
 | executed anywhere in the corpus | 15 |
 | **executed by the songs that were listened to** | **13** |
 | **added by the sound effects, which were listened to too** | **4** |
+| **added by the cries, listened to as well** | **1** — `duty_cycle_pattern` |
 | executed in the corpus but not in those songs | 2 — `pitch_slide`, `sound_jump` |
 
 The sound effects were worth listening to separately rather than as more of
 the same, and the four they add say why: `pitch_sweep`, `toggle_sfx`,
 `sfx_toggle_noise` and `music_f2` are executed by no song in the cartridge at
 all. An effect is not a short tune — it drives the other channel set and leans
-on a different part of the language.
+on a different part of the language. The cries add one more again — a cry is
+shorter and simpler than either, and still reaches something neither did.
 
-So **seventeen** commands are now bounded in both directions: from above by the
+So **eighteen** commands are now bounded in both directions: from above by the
 extents and the address checks, from below by an ear that would have heard an
 extra note. Two more occur in the corpus and have not been listened to. The
-remaining twenty-one never execute at all, and for those the borrowed widths
+remaining twenty never execute at all, and for those the borrowed widths
 rest on nothing but the source they were borrowed from — which is exactly where
 the script opcode table stood before its own walk, and is not an argument that
 they are right.
@@ -2001,6 +2003,24 @@ values at different offsets.
 around 256 and runs from 56 to 576, so it is applied as a multiplier against
 256. The pitch is not inferred — it is added to the frequency register, which is
 what the cartridge's own `pitch_offset` command does.
+
+#### The inferred half, heard
+
+The cries were rendered and played back and reported as sounding right, families
+included — 1/2/3 and 4/6 and 129/130 each one sound getting lower and longer.
+
+That matters most for the part that was flagged as untrustworthy. The pitch was
+never in doubt: it is added to the frequency register, which is what the
+cartridge's own `pitch_offset` command does. **How the length scales was
+inferred** — it clusters around 256 and runs from 56 to 576, so it is applied as
+a multiplier against 256 — and a wrong divisor is exactly what an ear catches,
+because Venusaur would run short or drag.
+
+It is worth being precise about what that buys, though. An ear confirms the
+scaling is *about* right; it does not confirm 256 is the exact divisor, and
+nothing here measures that. A factor a few percent out would sound identical.
+So the reading stands as confirmed-in-shape and unmeasured-in-detail, which is
+a weaker claim than the pitch beside it and should stay written down as one.
 
 ### The mixer was most of the cost
 

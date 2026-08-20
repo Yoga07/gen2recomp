@@ -246,6 +246,13 @@ function probe.run(rom_path, report_path, which)
         end
       end
       love.filesystem.write("dump/audio/cries.wav", wav(out, probe.RATE))
+      -- Cries run through the same sequencer, and they are shorter and simpler
+      -- than either a song or an effect, so what they exercise is worth
+      -- counting separately rather than assuming it is a subset.
+      probe.cry_commands = {}
+      for opcode, times in pairs(player.effect.executed or {}) do
+        probe.cry_commands[opcode] = times
+      end
       log("  -> dump/audio/cries.wav")
     end
   end
@@ -348,6 +355,19 @@ function probe.run(rom_path, report_path, which)
       "reached: %s", #effects_only,
       #effects_only > 0 and table.concat(effects_only, ", ") or "none")
     log("  and share %d with them", both)
+
+    -- And the cries, listened to as well.
+    local cries_only = {}
+    for opcode in pairs(probe.cry_commands or {}) do
+      if music_ops.commands[opcode] and not heard[opcode]
+        and not (probe.effect_commands or {})[opcode] then
+        cries_only[#cries_only + 1] = music_ops.commands[opcode][1]
+      end
+    end
+    table.sort(cries_only)
+    log("  the cries add %d command(s) neither songs nor effects reached: %s",
+      #cries_only,
+      #cries_only > 0 and table.concat(cries_only, ", ") or "none")
   end
 
   rom:release()

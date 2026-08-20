@@ -67,7 +67,7 @@ every feature (`grass`, `catch`, `trainer`, `mart`, `sell`, `surf`, `cut`,
 takes an optional species number as a fourth argument, so a particular entry's
 layout can be looked at rather than whichever one the demo picks.
 
-### Three environment traps that have cost real time
+### Six environment traps that have cost real time
 
 1. **PowerShell `Start-Process -ArgumentList` joins array elements without
    quoting.** A ROM path with spaces is silently truncated and the run exits 0
@@ -92,6 +92,14 @@ layout can be looked at rather than whichever one the demo picks.
    full of both. Edit them with a tool that round-trips UTF-8; if a shell
    rewrite is unavoidable, pass `-Encoding UTF8` to *both* ends. `git diff`
    catches it immediately, which is the reason to look before committing.
+6. **`perl -0pi` with a `\x{...}` escape re-encodes the whole file.** Same
+   damage as trap 5, different tool. A single `\x{e9}` anywhere in the
+   replacement makes the string wide, which puts perl's output handle into UTF-8
+   mode, and every byte in the file gets encoded a second time — one two-line
+   edit turned into 150 changed lines and every `é` into `Ã©`. Perl prints
+   `Wide character in print` when it happens, which is the warning to stop on.
+   Type the accented character literally or edit with something else. The tell
+   in `git diff` is a stat far larger than the edit.
 
 ---
 
@@ -187,12 +195,13 @@ problems and only one of them is the wall:
    note rather than desynchronising anything.
    That has now been done twice. Three songs were rendered and played back and
    reported as the real tunes with no spurious notes, and then a song with six
-   sound effects fired over it. Together that bounds from below the **17 of 40
-   commands those actually executed** — 13 from the songs and 4 the effects add
-   that no song in the cartridge reaches at all (`pitch_sweep`, `toggle_sfx`,
-   `sfx_toggle_noise`, `music_f2`), which is why effects were worth hearing
-   separately rather than as more of the same. Two more (`pitch_slide`,
-   `sound_jump`) occur in the corpus and have not been heard; **21 never execute
+   sound effects fired over it. Together that bounds from below the **18 of 40
+   commands those actually executed** — 13 from the songs, 4 the effects add
+   that no song reaches at all (`pitch_sweep`, `toggle_sfx`, `sfx_toggle_noise`,
+   `music_f2`), and 1 more from the cries (`duty_cycle_pattern`), which is why
+   each was worth hearing separately rather than as more of the same. Two more
+   (`pitch_slide`, `sound_jump`) occur in the corpus and have not been heard;
+   **20 never execute
    anywhere**, and for those the borrowed widths rest on nothing but the source
    they came from. Rendering more songs and more effects is the cheap way to
    extend this — `--probe-song <rom> <report> <index>` takes a song number.
@@ -239,8 +248,10 @@ problems and only one of them is the wall:
    the 13 bytes between the tables push a three-byte grid walk permanently out
    of phase with the cry block. The pitch is applied as a frequency offset,
    which is what the cartridge's own `pitch_offset` does; **how the length
-   scales is inferred** as a multiplier against 256, and is the part to
-   distrust.
+   scales is inferred** as a multiplier against 256. The cries have since been
+   played back and sound right, families included, which confirms that scaling
+   is about right — but an ear cannot tell 256 from a divisor a few percent
+   off, so the detail remains unmeasured.
 
 ### The claim, tested at last
 

@@ -1,0 +1,233 @@
+ Cries # gen2recomp
+ Cries 
+ Cries A reimplementation of Pokémon Gold, Silver, and Crystal in Lua and LÖVE, in the
+ Cries same spirit as [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
+ Cries 
+ Cries The engine is hand-written. Game data — species, moves, text, graphics, maps,
+ Cries music — is extracted from a cartridge image that you supply. The image is
+ Cries verified, read once during import, and released. **It is never copied into the
+ Cries cache and it is never written to disk.** No ROM is included here, and this
+ Cries project does not emulate the Game Boy.
+ Cries 
+ Cries ## Status
+ Cries 
+ Cries The data pipeline is verified against a real cartridge, and the engine runs:
+ Cries you can walk the overworld, talk to people, fight wild Pokemon and catch them.
+ Cries 
+ Cries | Area | State |
+ Cries | --- | --- |
+ Cries | Cartridge verification and identification | working |
+ Cries | Bank / far-pointer addressing | working |
+ Cries | LZ graphics decompression | working |
+ Cries | 2bpp tile and BGR555 palette decoding | working |
+ Cries | Species names, move names, base stats, move data | working |
+ Cries | Pokémon front and back sprites | working, 250 of 251 species |
+ Cries | Sprite palettes, normal and shiny | working |
+ Cries | Tilesets: graphics, blocks, collision | working, 31 tilesets |
+ Cries | Maps: headers, dimensions, block data, connections | working, 388 slots / 384 usable |
+ Cries | Map events: warps, triggers, signposts, NPCs | working |
+ Cries | Overworld sprites: player and NPCs | working, 102 sprites |
+ Cries | Wild encounters, grass and water | working — 91 and 62 maps |
+ Cries | Trainer parties | working — 532 trainers |
+ Cries | Learnsets and evolutions | working — 2215 moves, 113 evolutions |
+ Cries | Dialogue text and charmap | working — 1954 of 1963 text blocks |
+ Cries | Font | working — the one hardcoded offset, see docs |
+ Cries | Collision: terrain classification | working |
+ Cries | **Engine:** overworld rendering, movement, warps | working |
+ Cries | **Engine:** wild encounter trigger | working — grass, and cave floor |
+ Cries | **Engine:** Pokémon stats and party | working |
+ Cries | **Engine:** battles — types, damage, turn order | working |
+ Cries | **Engine:** catching and party | working |
+ Cries | **Engine:** experience, levelling, evolution | working — six growth curves |
+ Cries | **Engine:** fainting, sending out the next, blackout | working |
+ Cries | **Engine:** switching, and the bag in battle | working — FIGHT/PKMN/PACK/RUN |
+ Cries | TM and HM move list | working — 57 machines |
+ Cries | **Engine:** Surf | working — badges tracked but not earnable |
+ Cries | Cut trees and boulders | working — found, not listed |
+ Cries | **Engine:** Cut and Strength | working — trees fall, boulders push |
+ Cries | **Engine:** Whirlpool | working — water you cannot cross without the HM |
+ Cries | Whirlpool | working — collision `$24`, found by shape and confirmed by the art |
+ Cries | **Engine:** save and load | working |
+ Cries | Map scripts | interpreted — 1743 of 1771 run to an end |
+ Cries | **Engine:** battles started by scripts | working — wild and trainer |
+ Cries | Standard scripts | working — 52, reached by jumpstd |
+ Cries | **Engine:** yes-or-no prompts | working — 139 questions |
+ Cries | Movement blocks | working — 353 walks decoded |
+ Cries | **Engine:** NPCs turn, walk and vanish | working |
+ Cries | Unown's 26 forms | not located — see `src/rom/pics.lua` |
+ Cries | **Engine:** script interpreter | working — 14558 instructions decoded |
+ Cries | **Engine:** status conditions and stat stages | working |
+ Cries | Items: names, prices, pockets, effects | working — 255 items |
+ Cries | Status cures: which item undoes what | working — 14 items |
+ Cries | **Engine:** the bag, and items in battle | working — 4 pockets |
+ Cries | Item balls on the ground | working — 178 pickups |
+ Cries | Hidden items | working — 85, keyed by event flag |
+ Cries | Mart inventories | working — 34 shops, 27 shopkeepers |
+ Cries | **Engine:** shop counters, buying and selling | working — by quantity |
+ Cries | **Engine:** start menu, party list, summary | working |
+ Cries | Pokédex entries: class, height, weight, text | working — 251 entries |
+ Cries | **Engine:** the Pokédex | working — seen and caught, list and detail |
+ Cries | **Engine:** storage boxes | working — 14 boxes of 20 |
+ Cries | **Engine:** day/night clock | working — encounters and scripts |
+ Cries | Music table | located — 103 slots, 100 songs, 256 channel extents |
+ Cries | Channel bytecode | widths borrowed from pokecrystal — bounded above, see docs |
+ Cries | Game Boy sound chip | working — measured against the hardware, and heard |
+ Cries | **Engine:** music sequencer | working — 99 of 100 songs play, and sound right |
+ Cries | **Engine:** music while you play | working — each map plays its own tune |
+ Cries | Sound effect table | working — 207 slots, found behind the songs |
+ Cries | **Engine:** sound effects | working — scripts play them over the music |
+ Cries | Cries | working — 68 base cries, 251 species records |
+ Cries | **Engine:** cries | working — scripts make Pokémon shout |
+ Cries | Reading real .sav files | working — read from a real Crystal save |
+ Cries | **Engine:** map edge connections | working — 142 crossings |
+ Cries | **Engine:** trainer battles | working — 518 trainers across 57 classes |
+ Cries 
+ Cries Import a cartridge and press enter. Move with the arrow keys or WASD; doors
+ Cries warp between maps and routes run into each other at their edges, with the
+ Cries player and NPCs drawn from the cartridge's own
+ Cries sprites. Z or space reads a signpost or talks to someone. Walking in tall grass
+ Cries starts a battle, where Z confirms and the arrows pick FIGHT, BALL or RUN — a
+ Cries caught Pokemon joins your party. Balls come out of the bag and running out of
+ Cries them is a real outcome. Item balls lying on the ground are picked up by facing
+ Cries them and pressing Z, and stay picked up; so are the 85 items buried in the
+ Cries ground, if you press Z on the right square. Talking to a shopkeeper opens their
+ Cries counter, stocked with what that particular shop sells; they will buy things back
+ Cries at half price, but not your key items. Pick an item and a dial asks how many —
+ Cries up and down step by one, left and right by ten, and it will not let you dial
+ Cries past what you can pay for or what the bag will hold. X opens the menu — party list, summaries,
+ Cries and the bag, whose four pockets are filled from what the cartridge says each
+ Cries item is. The Pokédex is there too: every species you have met and every one you
+ Cries have owned, and a page on each with its sprite, its classification, its height
+ Cries and weight, its typing, its base stats and the two pages of description the
+ Cries cartridge itself carries, turned over with left and right. Each map plays its
+ Cries own music, synthesised from the cartridge's channel data through a Game Boy
+ Cries sound chip written from the hardware specification. F5 saves, and the
+ Cries bag, your money and the dex go with it; a save is loaded automatically.
+ Cries 
+ Cries Drop a cartridge `.sav` onto the window while playing and its party comes
+ Cries across. Nothing about the save's layout is hardcoded: the party is found by
+ Cries checking that every member's stats come back out of the stat formula.
+ Cries 
+ Cries 746 tests pass against Crystal (USA/Europe) rev 1, SHA-1
+ Cries `f2f52230b536214ef7c9924f483392993e226cfb`, and a further 18 run when a second,
+ Cries deliberately wrong cartridge is supplied — 764 in all. Nothing is claimed to be
+ Cries correct until it round-trips against content known independently of this code.
+ Cries 
+ Cries Offsets discovered in that cartridge, for reference — the importer finds these
+ Cries itself and does not depend on them:
+ Cries 
+ Cries | Table | Offset | Bank |
+ Cries | --- | --- | --- |
+ Cries | Base stats | `0x051424` | `$14` |
+ Cries | Species names | `0x053384` | `$14` |
+ Cries | Move data | `0x041AFB` | `$10` |
+ Cries | Move names | `0x1C9F29` | `$72` |
+ Cries | Pokémon pic pointers | `0x120000` | `$48` |
+ Cries | Trainer pic pointers | `0x128000` | `$4A` |
+ Cries | Sprite palettes | `0x00A8D6` | `$02` |
+ Cries | Tileset headers | `0x04D596` | `$13` |
+ Cries | Map headers | `0x094034` | `$25` |
+ Cries | Map group pointers | `0x094000` | `$25` |
+ Cries | Overworld sprite table | `0x014736` | `$05` |
+ Cries | Grass encounters | `0x02A5E9` | `$0A` |
+ Cries | Water encounters | `0x02B11D` | `$0A` |
+ Cries | Trainer parties | `0x039A1F` | `$0E` |
+ Cries | Pokédex entry pointers | `0x044378` | `$11` |
+ Cries | Status cures | `0x00F071` | `$03` |
+ Cries | Music table | `0x0E906E` | `$3A` |
+ Cries | Sound effect table | `0x0E927C` | `$3A` |
+ Cries | Base cries | `0x0E91B0` | `$3A` |
+ Cries | Species cries | `0x0F2787` | `$3C` |
+ Cries 
+ Cries ## Requirements
+ Cries 
+ Cries - [LÖVE 11.4 or newer](https://love2d.org/)
+ Cries - A cartridge image you own, in `.gbc` form
+ Cries 
+ Cries ## Running
+ Cries 
+ Cries ```bash
+ Cries love .
+ Cries ```
+ Cries 
+ Cries Drag your cartridge image onto the window. The importer reports what it found
+ Cries and writes the extracted data under LÖVE's save directory, in `cache/<game>/`.
+ Cries 
+ Cries There are headless entry points for scripting, since drag-and-drop cannot be
+ Cries automated:
+ Cries 
+ Cries ```bash
+ Cries love . --test "C:\path\to\crystal.gbc" report.txt
+ Cries ```
+ Cries 
+ Cries `--import` runs the real pipeline, `--probe-pics` is a format diagnostic. On
+ Cries Windows, `scripts\test.ps1 -Rom <path>` wraps the test run and prints the report
+ Cries (argument quoting matters — a ROM path with spaces silently truncates otherwise).
+ Cries 
+ Cries ## How table offsets are found
+ Cries 
+ Cries Most tools in this space hardcode a table of ROM offsets per game and per
+ Cries revision, which fails silently the moment it meets a dump it did not anticipate.
+ Cries This project searches instead.
+ Cries 
+ Cries Every data table begins with known content — species 1 is always Bulbasaur,
+ Cries move 1 is always Pound — so the first record can be encoded as a signature and
+ Cries searched for. A candidate is only accepted once the entire table decodes without
+ Cries a malformed record *and* spot checks on records we did not search for succeed:
+ Cries Mew at index 151, Celebi at 251, Struggle's 1 PP. If two offsets both validate,
+ Cries the import refuses to guess and says so.
+ Cries 
+ Cries The upshot is that Gold, Silver, Crystal, and their revisions all work from the
+ Cries same code, and a dump that would have decoded into nonsense fails loudly.
+ Cries 
+ Cries The second half of that is tested rather than asserted. Pass a non-Gen-2
+ Cries cartridge as `-Other` and the suite runs every locator against it and requires
+ Cries all of them to refuse:
+ Cries 
+ Cries ```bash
+ Cries scripts\test.ps1 -Rom "<crystal>" -Other "<a Gen 1 cartridge>"
+ Cries ```
+ Cries 
+ Cries A Gen 1 image is the interesting adversary, because it pads its species names to
+ Cries the same ten bytes in nearly the same encoding — three of the six signatures do
+ Cries occur in it, and validation is what throws them out. Finding that test also
+ Cries found a real bug: the sprite-palette search used to accept a Pokémon Red image.
+ Cries See the architecture notes.
+ Cries 
+ Cries The **first** half is still only a design claim. Nothing hardcodes Crystal, but
+ Cries the importer has only ever been run against Crystal; confirming it against Gold
+ Cries or Silver needs a cartridge nobody here has.
+ Cries 
+ Cries Discovered offsets are recorded in each cache's `manifest.lua`.
+ Cries 
+ Cries ## Layout
+ Cries 
+ Cries ```
+ Cries main.lua           entry point; importer UI
+ Cries conf.lua           LÖVE configuration
+ Cries src/rom/           cartridge decoding — header, banking, LZ, graphics, text
+ Cries src/audio/         the Game Boy sound chip; knows nothing of the cartridge
+ Cries src/import/        import pipeline and the on-disk cache
+ Cries src/util/          byte and bit helpers
+ Cries docs/              format notes and architecture
+ Cries tests/             decoder tests
+ Cries ```
+ Cries 
+ Cries ## On pokecrystal
+ Cries 
+ Cries The script opcode table in `src/rom/script_ops.lua` — command names and operand
+ Cries widths — is written from the [pokecrystal](https://github.com/pret/pokecrystal)
+ Cries disassembly's documentation of the script macros.
+ Cries 
+ Cries Nothing from that project is vendored here. It is used as a reference for facts:
+ Cries opcode numbers, operand widths, formula constants. Every one of those facts is
+ Cries then validated against the cartridge by walking all 1,500 scripts and checking
+ Cries where the walks land. Data continues to be *found* by signature search rather
+ Cries than by hardcoded offset, so the importer still works across Gold, Silver and
+ Cries Crystal from one code path.
+ Cries 
+ Cries ## Legal
+ Cries 
+ Cries This repository contains no Nintendo, Creatures, or Game Freak assets and no
+ Cries cartridge data. It requires a cartridge image that you provide. Pokémon and the
+ Cries Gen 2 games are the property of their respective owners.

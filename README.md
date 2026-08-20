@@ -76,7 +76,7 @@ you can walk the overworld, talk to people, fight wild Pokemon and catch them.
 | **Engine:** music while you play | working — each map plays its own tune |
 | Sound effect table | working — 207 slots, found behind the songs |
 | **Engine:** sound effects | working — scripts play them over the music |
-| Cries | working — 68 base cries, 251 species records |
+| Cries | working — 68 base cries, 251 species records, and they sound right |
 | **Engine:** cries | working — scripts make Pokémon shout |
 | Reading real .sav files | working — read from a real Crystal save |
 | **Engine:** map edge connections | working — 142 crossings |
@@ -194,9 +194,14 @@ occur in it, and validation is what throws them out. Finding that test also
 found a real bug: the sprite-palette search used to accept a Pokémon Red image.
 See the architecture notes.
 
-The **first** half is still only a design claim. Nothing hardcodes Crystal, but
-the importer has only ever been run against Crystal; confirming it against Gold
-or Silver needs a cartridge nobody here has.
+The **first** half is no longer only a design claim either. A Pokémon Gold
+cartridge has been imported, and every signature table located — at completely
+different offsets from Crystal's, which is the whole point of searching rather
+than hardcoding. Four things fail on Gold, and each says so rather than
+guessing: the font, whose Crystal offset is the one hardcoded value in the
+project, so the blind search runs and declines between four candidates; the
+standard-script table; the obstacle detector that depends on it; and the sprite
+pic table, whose bank bias is not Crystal's. See the handover.
 
 Discovered offsets are recorded in each cache's `manifest.lua`.
 
