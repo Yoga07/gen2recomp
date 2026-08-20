@@ -200,6 +200,15 @@ function probe.run(rom_path, report_path, which)
         wav(out, probe.RATE))
       log("  song 12 with effects %s fired over it -> " ..
         "dump/audio/song_with_effects.wav", table.concat(chosen, ", "))
+
+      -- Which commands the effects put through, kept for the count below.
+      -- Sound effects are not short songs: they drive the other channel set
+      -- and lean on a different mix of commands, so what an ear has actually
+      -- checked is the union of the two rather than the songs on their own.
+      probe.effect_commands = {}
+      for opcode, times in pairs(player.effect.executed or {}) do
+        probe.effect_commands[opcode] = times
+      end
     end
   end
 
@@ -282,6 +291,26 @@ function probe.run(rom_path, report_path, which)
     log("  %d of those were executed by the songs that were rendered", in_heard)
     log("  executed in the corpus but not in the rendered songs: %s",
       #unheard > 0 and table.concat(unheard, ", ") or "none")
+
+    -- The effects were listened to as well, and they are not short songs: they
+    -- drive the other channel set and use a different mix of commands. So the
+    -- set an ear has checked is the union, and the interesting number is how
+    -- many commands the effects add that no song reached.
+    local effects_only, both = {}, 0
+    for opcode in pairs(probe.effect_commands or {}) do
+      if music_ops.commands[opcode] then
+        if heard[opcode] then
+          both = both + 1
+        else
+          effects_only[#effects_only + 1] = music_ops.commands[opcode][1]
+        end
+      end
+    end
+    table.sort(effects_only)
+    log("  the effects that were listened to add %d command(s) no song " ..
+      "reached: %s", #effects_only,
+      #effects_only > 0 and table.concat(effects_only, ", ") or "none")
+    log("  and share %d with them", both)
   end
 
   rom:release()

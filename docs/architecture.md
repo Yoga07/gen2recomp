@@ -1748,12 +1748,19 @@ exact about how far it reaches:
 | in the table | 40 |
 | executed anywhere in the corpus | 15 |
 | **executed by the songs that were listened to** | **13** |
+| **added by the sound effects, which were listened to too** | **4** |
 | executed in the corpus but not in those songs | 2 — `pitch_slide`, `sound_jump` |
 
-So thirteen commands are now bounded in both directions: from above by the
+The sound effects were worth listening to separately rather than as more of
+the same, and the four they add say why: `pitch_sweep`, `toggle_sfx`,
+`sfx_toggle_noise` and `music_f2` are executed by no song in the cartridge at
+all. An effect is not a short tune — it drives the other channel set and leans
+on a different part of the language.
+
+So **seventeen** commands are now bounded in both directions: from above by the
 extents and the address checks, from below by an ear that would have heard an
 extra note. Two more occur in the corpus and have not been listened to. The
-remaining twenty-five never execute at all, and for those the borrowed widths
+remaining twenty-one never execute at all, and for those the borrowed widths
 rest on nothing but the source they were borrowed from — which is exactly where
 the script opcode table stood before its own walk, and is not an argument that
 they are right.

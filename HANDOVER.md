@@ -184,13 +184,17 @@ problems and only one of them is the wall:
    that is retracted. The remaining instrument for the direction the layout
    cannot see is **listening**, because a width one too small plays a spurious
    note rather than desynchronising anything.
-   That has now been done. Three songs were rendered and played back and
-   reported as the real tunes with no spurious notes, which bounds from below
-   the **13 of 40 commands those songs executed**. Two more (`pitch_slide`,
-   `sound_jump`) occur in the corpus and have not been heard; **25 never execute
+   That has now been done twice. Three songs were rendered and played back and
+   reported as the real tunes with no spurious notes, and then a song with six
+   sound effects fired over it. Together that bounds from below the **17 of 40
+   commands those actually executed** — 13 from the songs and 4 the effects add
+   that no song in the cartridge reaches at all (`pitch_sweep`, `toggle_sfx`,
+   `sfx_toggle_noise`, `music_f2`), which is why effects were worth hearing
+   separately rather than as more of the same. Two more (`pitch_slide`,
+   `sound_jump`) occur in the corpus and have not been heard; **21 never execute
    anywhere**, and for those the borrowed widths rest on nothing but the source
-   they came from. Rendering more songs is the cheap way to extend this —
-   `--probe-song <rom> <report> <index>` takes a song number.
+   they came from. Rendering more songs and more effects is the cheap way to
+   extend this — `--probe-song <rom> <report> <index>` takes a song number.
 3. **The sound chip.** ~~Not started~~ **done**, in `src/audio/apu.lua`. Four
    channels, the frame sequencer, the mixer and the output capacitor. It takes
    register writes at `$FF10`–`$FF3F`, so an emulator trace could be replayed
